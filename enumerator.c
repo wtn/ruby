@@ -4051,6 +4051,16 @@ rb_arithmetic_sequence_beg_len_step(VALUE obj, rb_len_t *begp, rb_len_t *lenp, r
     return Qnil;
 }
 
+static bool
+infinite_end_p(VALUE e)
+{
+    if (NIL_P(e)) return true;
+    if (RB_FLOAT_TYPE_P(e)) {
+        return isinf(NUM2DBL(e));
+    }
+    return false;
+}
+
 static VALUE
 arith_seq_take(VALUE self, VALUE num)
 {
@@ -4071,7 +4081,7 @@ arith_seq_take(VALUE self, VALUE num)
     s = arith_seq_step(self);
     x = arith_seq_exclude_end_p(self);
 
-    if (FIXNUM_P(b) && NIL_P(e) && FIXNUM_P(s)) {
+    if (FIXNUM_P(b) && infinite_end_p(e) && FIXNUM_P(s)) {
         long i = FIX2LONG(b), unit = FIX2LONG(s);
         ary = rb_ary_new_capa(n);
         while (n > 0 && FIXABLE(i)) {
