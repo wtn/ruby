@@ -3929,9 +3929,6 @@ make_errno_exc(const char *mesg)
     int n = errno;
 
     errno = 0;
-    if (n == 0) {
-        rb_bug("rb_sys_fail(%s) - errno == 0", mesg ? mesg : "");
-    }
     return rb_syserr_new(n, mesg);
 }
 
@@ -3942,10 +3939,6 @@ make_errno_exc_str(VALUE mesg)
 
     errno = 0;
     if (!mesg) mesg = Qnil;
-    if (n == 0) {
-        const char *s = !NIL_P(mesg) ? RSTRING_PTR(mesg) : "";
-        rb_bug("rb_sys_fail_str(%s) - errno == 0", s);
-    }
     return rb_syserr_new_str(n, mesg);
 }
 
@@ -4011,14 +4004,8 @@ rb_syserr_new_path_in(const char *func_name, int n, VALUE path)
     VALUE args[2];
 
     if (!path) path = Qnil;
-    if (n == 0) {
-        const char *s = !NIL_P(path) ? RSTRING_PTR(path) : "";
-        if (!func_name) func_name = "(null)";
-        rb_bug("rb_sys_fail_path_in(%s, %s) - errno == 0",
-               func_name, s);
-    }
     args[0] = path;
-    args[1] = rb_str_new_cstr(func_name);
+    args[1] = rb_str_new_cstr(func_name ? func_name : "(null)");
     return rb_class_new_instance(2, args, get_syserr(n));
 }
 #endif
