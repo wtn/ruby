@@ -875,6 +875,54 @@ end.join
     end;
   end
 
+  def test_exit_status_after_exit_handler
+    # An uncaught exception in an END/at_exit handler must fail the
+    # process even if an EXIT trap called exit(0) before it.
+    %w[END at_exit].each do |ex|
+      status = assert_in_out_err([], <<-"end;", [], [/.*E \(RuntimeError\).*\n/], ex, success: false)
+        Signal.trap(:EXIT) {exit 0}
+        #{ex} {raise "E"}
+      end;
+      assert_equal(1, status.exitstatus, ex)
+    end
+
+    # The status from the last exit handler to call exit wins.
+    status = assert_in_out_err([], <<-'end;', [], [])
+      Signal.trap(:EXIT) {exit 3}
+      END {exit 5}
+    end;
+    assert_equal(5, status.exitstatus)
+
+    status = assert_in_out_err([], <<-'end;', [], [/.*EXIT \(RuntimeError\).*\n/])
+      Signal.trap(:EXIT) {raise "EXIT"}
+      END {exit 42}
+    end;
+    assert_equal(42, status.exitstatus)
+  end
+
+  def test_errinfo_in_end_after_exit_handler
+    status = assert_in_out_err([], <<-'end;', ["#<SystemExit: exit>"], [])
+      Signal.trap(:EXIT) {exit 3}
+      END {p $!}
+    end;
+    assert_equal(3, status.exitstatus)
+
+    assert_in_out_err([], <<-'end;', ["#<RuntimeError: EXIT>"], [/.*EXIT \(RuntimeError\).*\n/], success: false)
+      Signal.trap(:EXIT) {raise "EXIT"}
+      END {p $!}
+    end;
+  end
+
+  def test_main_error_not_duplicated_by_exit_handler
+    assert_in_out_err([], <<-'end;', [], [], success: false) do |_, err, _|
+      Signal.trap(:EXIT) {raise "EXIT"}
+      raise "MAIN"
+    end;
+      assert_equal(1, err.grep(/MAIN \(RuntimeError\)/).size, err.join("\n"))
+      assert_equal(1, err.grep(/EXIT \(RuntimeError\)/).size, err.join("\n"))
+    end
+  end
+
   def test_raise_with_cause
     msg = "[Feature #8257]"
     cause = ArgumentError.new("foobar")

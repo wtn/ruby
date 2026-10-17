@@ -154,23 +154,33 @@ rb_ec_teardown(rb_execution_context_t *ec)
 {
     enum ruby_tag_type state = TAG_NONE;
     volatile VALUE trap_errinfo = Qnil;
+    volatile VALUE shown_causes = 0;
 
     // If the user code defined a scheduler for the top level thread, run it:
     rb_ec_fiber_scheduler_finalize(ec);
+
+    /* The main exception is reported by rb_ec_cleanup; do not replay it
+     * as the cause of an exception from the EXIT handler. */
+    add_shown_cause(ec->errinfo, (VALUE *)&shown_causes);
 
     EC_PUSH_TAG(ec);
     if ((state = EC_EXEC_TAG()) == TAG_NONE) {
         rb_vm_trap_exit(rb_ec_vm_ptr(ec));
     }
     else {
+        /* Keep it in ec->errinfo so that END handlers see it as `$!`
+         * and so that it decides the exit status unless an END handler
+         * raises or exits later. */
         trap_errinfo = ec->errinfo;
-        ec->errinfo = Qnil;
     }
     EC_POP_TAG();
     rb_ec_exec_end_proc(ec);
     if (!NIL_P(trap_errinfo)) {
-        error_handle(ec, trap_errinfo, state);
-        ec->errinfo = trap_errinfo;
+        /* Reporting replaces ec->errinfo; keep the END handlers' result
+         * so that the last handler decides the exit status. */
+        VALUE errinfo = ec->errinfo;
+        error_handle_with_shown_causes(ec, trap_errinfo, state, (VALUE *)&shown_causes);
+        ec->errinfo = errinfo;
     }
     rb_ec_clear_all_trace_func(ec);
 }
