@@ -809,6 +809,39 @@ class TestTimeTZ::DummyTZ < Test::Unit::TestCase
     assert_predicate(out, :valid_encoding?)
     assert_equal("\u{2606 6771 4eac 6a19 6e96 6642}", out)
   end
+
+  def test_strftime_zone_abbreviation_position
+    # The result must keep the format's encoding wherever %Z appears in it.
+    # When %Z comes first the misencoded result can still be valid, so compare
+    # the contents too.
+    zone = TestTimeTZ::TZ.new("Encoding", "\u{65e5 672c 6a19 6e96 6642}", 0)
+    t = TIME_CLASS.new(2020, 1, 1, 0, 0, 0, zone)
+
+    out = t.strftime("\u{5e74} %Z".encode(Encoding::EUC_JP))
+    assert_equal(Encoding::EUC_JP, out.encoding)
+    assert_predicate(out, :valid_encoding?)
+    assert_equal("\u{5e74} \u{65e5 672c 6a19 6e96 6642}".encode(Encoding::EUC_JP), out)
+
+    out = t.strftime("%Z \u{5e74}".encode(Encoding::EUC_JP))
+    assert_equal(Encoding::EUC_JP, out.encoding)
+    assert_predicate(out, :valid_encoding?)
+    assert_equal("\u{65e5 672c 6a19 6e96 6642} \u{5e74}".encode(Encoding::EUC_JP), out)
+  end
+
+  def test_strftime_zone_abbreviation_position_converted
+    zone = TestTimeTZ::TZ.new("Encoding", "\u{65e5 672c 6a19 6e96 6642}".encode(Encoding::EUC_JP), 0)
+    t = TIME_CLASS.new(2020, 1, 1, 0, 0, 0, zone)
+
+    out = t.strftime("\u{5e74} %Z")
+    assert_equal(Encoding::UTF_8, out.encoding)
+    assert_predicate(out, :valid_encoding?)
+    assert_equal("\u{5e74} \u{65e5 672c 6a19 6e96 6642}", out)
+
+    out = t.strftime("%Z \u{5e74}")
+    assert_equal(Encoding::UTF_8, out.encoding)
+    assert_predicate(out, :valid_encoding?)
+    assert_equal("\u{65e5 672c 6a19 6e96 6642} \u{5e74}", out)
+  end
 end
 
 begin

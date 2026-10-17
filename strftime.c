@@ -227,15 +227,34 @@ format_value(VALUE val, int base)
 	return rb_big2str(val, base);
 }
 
+/* The encoding of a format is always ASCII compatible, so looking at the
+ * bytes is enough to tell whether it is ASCII only. */
+static int
+format_asciionly_p(const char *format, size_t format_len)
+{
+	const char *const format_end = format + format_len;
+
+	while (format < format_end) {
+		if ((unsigned char)*format++ >= 0x80) return 0;
+	}
+	return 1;
+}
+
 /*
  * enc is the encoding of the format and the initial result string. It is also
  * used as the target encoding when a timezone name is incompatible with the
  * result string.
+ *
+ * asciionly tells whether the whole format is ASCII only, including the
+ * enclosing format of a nested call, which appends to the same result string.
+ * Only then may %Z adopt the encoding of the timezone abbreviation, as nothing
+ * else can contribute non-ASCII bytes to the result.
  */
 static VALUE
 rb_strftime_with_timespec(VALUE ftime, const char *format, size_t format_len,
-			  rb_encoding *enc, VALUE time, const struct vtm *vtm,
-			  VALUE timev, struct timespec *ts, int gmt, size_t maxsize)
+			  rb_encoding *enc, int asciionly, VALUE time,
+			  const struct vtm *vtm, VALUE timev, struct timespec *ts,
+			  int gmt, size_t maxsize)
 {
 	size_t len = RSTRING_LEN(ftime);
 	char *s = RSTRING_PTR(ftime);
@@ -318,7 +337,8 @@ rb_strftime_with_timespec(VALUE ftime, const char *format, size_t format_len,
 			len = s - start; \
 			rb_str_set_len(ftime, len); \
 			if (!rb_strftime_with_timespec(ftime, (fmt), rb_strlen_lit(fmt), \
-						       enc, time, vtm, timev, ts, gmt, maxsize)) \
+						       enc, asciionly, time, vtm, timev, \
+						       ts, gmt, maxsize)) \
 				return 0; \
 			s = RSTRING_PTR(ftime); \
 			i = RSTRING_LEN(ftime) - len; \
@@ -632,7 +652,8 @@ rb_strftime_with_timespec(VALUE ftime, const char *format, size_t format_len,
 				}
 
 				if (enc) {
-					rb_encoding *compat = rb_enc_compatible(ftime, zone);
+					rb_encoding *compat = asciionly ?
+						rb_enc_compatible(ftime, zone) : NULL;
 					if (compat && rb_enc_asciicompat(compat)) {
 						rb_enc_associate(ftime, compat);
 					}
@@ -935,6 +956,7 @@ rb_strftime(const char *format, size_t format_len, rb_encoding *enc,
 {
 	VALUE buff = create_buffer(enc);
 	buff = rb_strftime_with_timespec(buff, format, format_len, enc,
+					 format_asciionly_p(format, format_len),
 					 time, vtm, timev, NULL, gmt,
 					 strftime_size_limit(format_len));
 	return rb_obj_reveal(buff, rb_cString);
@@ -946,6 +968,7 @@ rb_strftime_timespec(const char *format, size_t format_len, rb_encoding *enc,
 {
 	VALUE buff = create_buffer(enc);
 	buff = rb_strftime_with_timespec(buff, format, format_len, enc,
+					 format_asciionly_p(format, format_len),
 					 time, vtm, Qnil, ts, gmt,
 					 strftime_size_limit(format_len));
 	return rb_obj_reveal(buff, rb_cString);
@@ -959,6 +982,7 @@ rb_strftime_limit(const char *format, size_t format_len, rb_encoding *enc,
 {
 	VALUE buff = create_buffer(enc);
 	buff = rb_strftime_with_timespec(buff, format, format_len, enc,
+					 format_asciionly_p(format, format_len),
 					 time, vtm, Qnil, ts, gmt, maxsize);
 	return rb_obj_reveal(buff, rb_cString);
 }
