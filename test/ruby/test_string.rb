@@ -1276,6 +1276,75 @@ CODE
     assert_bit_op_chilled_string_warning(:bit_flip, (7000 * 8)..(7100 * 8))
   end
 
+  def test_setbyte_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target.setbyte(7000, 0x43)}')
+  end
+
+  def test_aset_index_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target[7000] = "x"}')
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target[7000, 100] = "x"}')
+  end
+
+  def test_aset_range_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(RangeError) {$target[7000..7100] = "x"}')
+  end
+
+  def test_aset_string_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target["AAAA"] = "x"}')
+  end
+
+  def test_aset_regexp_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target[/A+/] = "x"}')
+  end
+
+  def test_aset_drop_bytes_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('$target[0, 5] = ""; assert_equal("BBB", $target)')
+  end
+
+  def test_insert_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target.insert(7000, "x")}')
+  end
+
+  def test_bytesplice_chilled_string_warning
+    return unless @cls == String
+    assert_chilled_string_warning_reentrancy('assert_raise(IndexError) {$target.bytesplice(7000, 100, "x")}')
+    assert_chilled_string_warning_reentrancy('assert_raise(RangeError) {$target.bytesplice(7000..7100, "x")}')
+  end
+
+  def assert_chilled_string_warning_reentrancy(code)
+    assert_separately([], "#{<<-"{#"}\n#{<<-'};'}")
+    $target = <<~STR            # chilled string
+    #{("A"*63+"\n")*128}        # 64*128 = 8192
+    STR
+    END {
+      #{code}
+    }
+    {#
+      $reentered = false
+
+      module ShrinkOnWarning
+        def warn(message, category: nil, **kwargs)
+          if category == :deprecated && !$reentered
+            $reentered = true
+            $target.replace("B" * 8)
+            return nil
+          end
+
+          super
+        end
+      end
+
+      Warning.extend(ShrinkOnWarning)
+    };
+  end
+
   def assert_bit_op_chilled_string_warning(op, *args)
     assert_separately([], "#{<<-"{#"}\n#{<<-'};'}")
     $target = <<~STR            # chilled string
