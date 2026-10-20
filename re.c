@@ -1782,6 +1782,8 @@ rb_reg_prepare_re(VALUE re, VALUE str)
 
     regex_t *reg = RREGEXP_PTR(re);
     if (reg->enc == enc) return reg;
+    /* reg->chain caches the program compiled for the last other encoding. */
+    if (reg->chain && reg->chain->enc == enc) return reg->chain;
 
     rb_reg_check(re);
 
@@ -1797,46 +1799,32 @@ rb_reg_prepare_re(VALUE re, VALUE str)
         rb_raise(rb_eArgError, "regexp preprocess failed: %s", err);
     }
 
-    // inherit the timeout settings
-    rb_hrtime_t timelimit = reg->timelimit;
-
     const char *ptr;
     rb_len_t len;
     RSTRING_GETMEM(unescaped, ptr, len);
 
-    /* If there are no other users of this regex, then we can directly overwrite it. */
-    if (ruby_single_main_ractor && RREGEXP(re)->usecnt == 0) {
-        regex_t tmp_reg;
-        r = onig_new_without_alloc(&tmp_reg, (UChar *)ptr, (UChar *)(ptr + len),
-                                   reg->options, enc,
-                                   OnigDefaultSyntax, &einfo);
-
-        if (r) {
-            /* There was an error so perform cleanups. */
-            onig_free_body(&tmp_reg);
-        }
-        else {
-            onig_free_body(reg);
-            /* There are no errors so set reg to tmp_reg. */
-            *reg = tmp_reg;
-        }
-    }
-    else {
-        r = onig_new(&reg, (UChar *)ptr, (UChar *)(ptr + len),
-                     reg->options, enc,
-                     OnigDefaultSyntax, &einfo);
-    }
+    regex_t *tmp_reg;
+    r = onig_new(&tmp_reg, (UChar *)ptr, (UChar *)(ptr + len),
+                 reg->options, enc,
+                 OnigDefaultSyntax, &einfo);
 
     if (r) {
         onig_error_code_to_str((UChar*)err, r, &einfo);
         rb_reg_raise(err, re);
     }
 
-    reg->timelimit = timelimit;
+    // inherit the timeout settings
+    tmp_reg->timelimit = reg->timelimit;
+
+    /* If there are no other users of this regex, then we can replace the cached program. */
+    if (ruby_single_main_ractor && RREGEXP(re)->usecnt == 0) {
+        onig_free(reg->chain);
+        reg->chain = tmp_reg;
+    }
 
     RB_GC_GUARD(unescaped);
     RB_GC_GUARD(src_str);
-    return reg;
+    return tmp_reg;
 }
 
 OnigPosition
@@ -1846,7 +1834,7 @@ rb_reg_onig_match(VALUE re, VALUE str,
 {
     regex_t *reg = rb_reg_prepare_re(re, str);
 
-    bool tmpreg = reg != RREGEXP_PTR(re);
+    bool tmpreg = reg != RREGEXP_PTR(re) && reg != RREGEXP_PTR(re)->chain;
     if (!tmpreg) RREGEXP(re)->usecnt++;
 
     OnigPosition result = match(reg, str, regs, args);

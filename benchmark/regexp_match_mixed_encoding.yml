@@ -1,0 +1,21 @@
+prelude: |
+  re = /(\w+)@(\w+)\.com/
+  utf8 = "résumé@example.com"
+  ascii = "resume@example.com".encode(Encoding::US_ASCII)
+  binary = "resume@example.com".b
+  ascii_utf8 = "resume@example.com"
+  re_i = /sit amet needle/i
+  hay = "lorem ipsum dolor sit amet " * 200 + "needle"
+benchmark:
+  utf8_then_usascii: |
+    re.match?(utf8)
+    re.match?(ascii)
+  utf8_then_binary: |
+    re.match?(utf8)
+    re.match?(binary)
+  utf8_then_ascii_utf8: |
+    re.match?(utf8)
+    re.match?(ascii_utf8)
+  ignorecase_utf8_then_ascii_utf8: |
+    re_i.match?(utf8)
+    re_i.match?(hay)

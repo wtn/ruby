@@ -2336,6 +2336,28 @@ class TestRegexp < Test::Unit::TestCase
     end
   end
 
+  def test_match_ascii_only_string_after_non_ascii_match
+    re = /(?<user>\w+)@(?<host>\w+)/
+    utf8 = "caf\u00e9 foo@bar"
+
+    assert_equal("foo", re.match(utf8)[:user])
+    assert_equal("foo", re.match("foo@bar".encode(Encoding::US_ASCII))[:user])
+    assert_equal("foo", re.match("foo@bar")[:user])
+    assert_equal(Encoding::ASCII_8BIT, re.match("foo@bar".b)[:user].encoding)
+    assert_equal(4, re.match("a@b foo@bar".b, 1).begin(0))
+    assert_equal("foo", re.match("caf\xE9 foo@bar".b)[:user])
+    assert_equal("foo", re.match(utf8)[:user])
+    assert_equal("foo", re.dup.match(utf8)[:user])
+    assert_equal([Encoding::US_ASCII] * 2, re.names.map(&:encoding))
+
+    re = /foo/n
+    assert_equal(1, "\xFFfoo".b =~ re)
+    assert_equal(0, "foo" =~ re)
+    assert_equal(1, assert_warning(/binary regexp/) {"\u3042foo" =~ re})
+    assert_equal(0, "foo".encode(Encoding::US_ASCII) =~ re)
+    assert_equal(1, "\xFFfoo".b =~ re)
+  end
+
   def test_bug_19537 # [Bug #19537]
     str = 'aac'
     re = '^([ab]{1,3})(a?)*$'
