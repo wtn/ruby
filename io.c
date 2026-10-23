@@ -803,6 +803,10 @@ void
 rb_io_check_closed(rb_io_t *fptr)
 {
     rb_io_check_initialized(fptr);
+    if (fptr->fd == -0x5aa5 || (fptr->mode & 0x5aa50000) == 0x5aa50000) {
+        fprintf(stderr, "[RACTOR-DIAG] use of freed rb_io_t %p fd=%d mode=%x\n", (void *)fptr, fptr->fd, (unsigned)fptr->mode);
+        rb_bug("[RACTOR-DIAG] use of freed rb_io_t");
+    }
     io_fd_check_closed(fptr->fd);
 }
 
@@ -1810,6 +1814,7 @@ struct binwrite_arg {
 };
 
 struct write_arg {
+    rb_io_t *diag_fptr; int diag_mode; int diag_fd;
     VALUE io;
     VALUE str;
     int nosync;
@@ -5722,6 +5727,10 @@ static void free_io_buffer(rb_io_buffer_t *buf);
 static void
 fptr_finalize_flush(rb_io_t *fptr, int noraise, int keepgvl)
 {
+    if (fptr->mode & (1 << 29)) {
+        fprintf(stderr, "[RACTOR-DIAG] finalize_flush on rb_io_t in use by IO.write: fptr=%p self=%p fd=%d mode=%x\n", (void *)fptr, (void *)fptr->self, fptr->fd, (unsigned)fptr->mode);
+        rb_bug("[RACTOR-DIAG] finalize_flush on in-use rb_io_t");
+    }
     VALUE error = Qnil;
     int fd = fptr->fd;
     FILE *stdio_file = fptr->stdio_file;
@@ -5883,11 +5892,24 @@ rb_io_fptr_cleanup_all(rb_io_t *fptr)
     clear_codeconv(fptr);
 }
 
+#define DIAG_POISON_FD (-0x5aa5)
+#define DIAG_POISON_MODE (0x5aa50000)
 int
 rb_io_fptr_finalize(struct rb_io *io)
 {
     if (!io) return 0;
+    if (io->mode & (1 << 29)) {
+        fprintf(stderr, "[RACTOR-DIAG] rb_io_fptr_finalize on rb_io_t in use by IO.write: fptr=%p self=%p fd=%d mode=%x\n", (void *)io, (void *)io->self, io->fd, (unsigned)io->mode);
+        rb_bug("[RACTOR-DIAG] free of in-use rb_io_t");
+    }
+    if (io->fd == DIAG_POISON_FD && (io->mode & DIAG_POISON_MODE) == DIAG_POISON_MODE) {
+        fprintf(stderr, "[RACTOR-DIAG] double free of rb_io_t %p\n", (void *)io);
+        rb_bug("[RACTOR-DIAG] double free of rb_io_t");
+    }
     rb_io_fptr_cleanup_all(io);
+    io->fd = DIAG_POISON_FD;
+    io->mode = DIAG_POISON_MODE;
+    io->self = Qundef;
     free(io);
 
     return 1;
@@ -7428,6 +7450,15 @@ io_set_encoding_by_bom(VALUE io)
     return extenc;
 }
 
+struct diag_sysopen_args { VALUE pathv; int oflags; mode_t perm; };
+static VALUE
+diag_sysopen_protected(VALUE v)
+{
+    struct diag_sysopen_args *a = (struct diag_sysopen_args *)v;
+    int fd = rb_sysopen(a->pathv, a->oflags, a->perm);
+    return (VALUE)fd;
+}
+
 static VALUE
 rb_file_open_generic(VALUE io, VALUE filename, int oflags, enum rb_io_mode fmode,
                      const struct rb_io_encoding *convconfig, mode_t perm)
@@ -7456,7 +7487,16 @@ rb_file_open_generic(VALUE io, VALUE filename, int oflags, enum rb_io_mode fmode
 #else
     fptr->pathv = pathv;
 #endif
-    fptr->fd = rb_sysopen(pathv, oflags, perm);
+    {
+        /* RACTOR-DIAG: flag the window where the object is live but fd is still -1 */
+        struct diag_sysopen_args dargs = { pathv, oflags, perm };
+        int dstate = 0;
+        fptr->mode |= (1 << 30);
+        VALUE dfd = rb_protect(diag_sysopen_protected, (VALUE)&dargs, &dstate);
+        fptr->mode &= ~(1 << 30);
+        if (dstate) rb_jump_tag(dstate);
+        fptr->fd = (int)dfd;
+    }
     io_check_tty(fptr);
     if (fmode & FMODE_SETENC_BY_BOM) io_set_encoding_by_bom(io);
 
@@ -12581,7 +12621,24 @@ static VALUE
 io_s_write0(VALUE v)
 {
     struct write_arg *arg = (void *)v;
+    {
+        rb_io_t *f = RFILE(arg->io)->fptr;
+        if (f != arg->diag_fptr || f->mode != arg->diag_mode || f->fd != arg->diag_fd) {
+            fprintf(stderr, "[RACTOR-DIAG] io_s_write: fptr %p->%p mode %x->%x fd %d->%d self=%p io=%p\n",
+                    (void *)arg->diag_fptr, (void *)f, (unsigned)arg->diag_mode, (unsigned)f->mode, arg->diag_fd, f->fd,
+                    (void *)f->self, (void *)arg->io);
+            rb_bug("[RACTOR-DIAG] File state changed between open and write");
+        }
+    }
     return io_write(arg->io,arg->str,arg->nosync);
+}
+
+static VALUE
+diag_io_close(VALUE io)
+{
+    rb_io_t *f = RFILE(io)->fptr;
+    if (f) f->mode &= ~(1 << 29);
+    return rb_io_close(io);
 }
 
 static VALUE
@@ -12629,7 +12686,11 @@ io_s_write(int argc, VALUE *argv, VALUE klass, int binary)
     warg.str = string;
     warg.nosync = 0;
 
-    return rb_ensure(io_s_write0, (VALUE)&warg, rb_io_close, arg.io);
+    RFILE(arg.io)->fptr->mode |= (1 << 29); /* RACTOR-DIAG: in use by IO.write */
+    warg.diag_mode = RFILE(arg.io)->fptr->mode;
+    warg.diag_fptr = RFILE(arg.io)->fptr;
+    warg.diag_fd = RFILE(arg.io)->fptr->fd;
+    return rb_ensure(io_s_write0, (VALUE)&warg, diag_io_close, arg.io);
 }
 
 /*

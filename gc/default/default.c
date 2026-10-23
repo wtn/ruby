@@ -2248,6 +2248,11 @@ gc_check_obj_in_page(struct heap_page *page, VALUE obj)
 static inline void
 heap_page_add_free_region(rb_objspace_t *objspace, struct heap_page *page, VALUE obj)
 {
+    if (page->objspace != objspace && !objspace->flags.during_global_gc && !page->objspace->flags.during_global_gc) {
+        fprintf(stderr, "[RACTOR-DIAG] add_free_region: obj %p page objspace %p != current objspace %p\n",
+                (void *)obj, (void *)page->objspace, (void *)objspace);
+        rb_bug("[RACTOR-DIAG] free region pushed onto foreign page outside global GC");
+    }
     rb_asan_unpoison_object(obj, false);
 
     // Should have already been reset
@@ -3760,6 +3765,11 @@ void
 rb_gc_impl_make_zombie(void *objspace_ptr, VALUE obj, void (*dfree)(void *), void *data)
 {
     rb_objspace_t *objspace = objspace_ptr;
+    if (GET_HEAP_PAGE(obj)->objspace != objspace) {
+        fprintf(stderr, "[RACTOR-DIAG] make_zombie: obj %p on page of objspace %p filed under objspace %p (global_gc=%d)\n",
+                (void *)obj, (void *)GET_HEAP_PAGE(obj)->objspace, (void *)objspace, (int)objspace->flags.during_global_gc);
+        rb_bug("[RACTOR-DIAG] zombie filed under non-owner objspace");
+    }
 
     struct RZombie *zombie = RZOMBIE(obj);
     zombie->flags = T_ZOMBIE | (zombie->flags & ZOMBIE_OBJ_KEPT_FLAGS);

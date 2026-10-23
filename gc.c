@@ -1679,6 +1679,14 @@ rb_gc_obj_needs_cleanup_p(VALUE obj)
 static void
 io_fptr_finalize(void *fptr)
 {
+    {
+        rb_io_t *dfp = fptr;
+        VALUE dself = dfp->self;
+        if (dself && dself != Qnil && dself != Qundef && BUILTIN_TYPE(dself) != T_ZOMBIE) {
+            fprintf(stderr, "[RACTOR-DIAG] IO zombie finalizer for fptr %p whose self %p is type %d (not a zombie)\n", fptr, (void *)dself, (int)BUILTIN_TYPE(dself));
+            rb_bug("[RACTOR-DIAG] stale IO zombie finalizer");
+        }
+    }
     rb_io_fptr_finalize((struct rb_io *)fptr);
 }
 
@@ -1874,6 +1882,18 @@ rb_gc_obj_free(void *objspace, VALUE obj)
         break;
       case T_FILE:
         if (RFILE(obj)->fptr) {
+            {
+                rb_io_t *dfptr = RFILE(obj)->fptr;
+                if (dfptr->mode & ((1 << 30) | (1 << 29)) /* DIAG_OPENING | DIAG_INUSE */) {
+                    rb_ractor_t *dcr = rb_current_ractor_raw(false);
+                    fprintf(stderr, "[RACTOR-DIAG] GC freeing File %p mid-open: fd=%d mode=%x fptr=%p fptr->self=%p global_gc=%d foreign=%d cur_ractor=%u pathv=%s\n",
+                            (void *)obj, dfptr->fd, (unsigned)dfptr->mode, (void *)dfptr, (void *)dfptr->self,
+                            (int)rb_gc_impl_during_global_gc_p(objspace), (int)rb_gc_impl_obj_foreign_p(objspace, obj),
+                            dcr ? (unsigned)rb_ractor_id(dcr) : 0u,
+                            RB_TYPE_P(dfptr->pathv, T_STRING) ? RSTRING_PTR(dfptr->pathv) : "?");
+                    rb_bug("[RACTOR-DIAG] premature File free");
+                }
+            }
             bool closed = rb_io_fptr_finalize_closed(RFILE(obj)->fptr);
             if (!closed) make_io_zombie(objspace, obj);
             RB_DEBUG_COUNTER_INC(obj_file_ptr);

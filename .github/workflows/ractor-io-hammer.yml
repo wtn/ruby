@@ -1,0 +1,102 @@
+name: Ractor IO hammer
+
+# Throwaway diagnostic workflow: builds --enable-yjit=dev with the rb_io_t /
+# File-slot traps from this branch and loops TestRactor#test_concurrent_binwrite_shareable_string
+# under full-suite load for hours. A trap firing is an rb_bug whose crash report
+# (C backtrace, owning Ractor, fptr state) is dumped at the end.
+
+on:
+  push:
+    branches:
+      - ractor-io-diag
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_RETRY: 10
+  CARGO_HTTP_MULTIPLEXING: false
+
+jobs:
+  hammer:
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [1, 2, 3]
+
+    runs-on: macos-26
+    timeout-minutes: 355
+
+    env:
+      GITPULLOPTIONS: --no-tags origin ${{ github.ref }}
+      RUN_OPTS: '--yjit-call-threshold=1 --yjit-verify-ctx --yjit-code-gc'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout-cone-mode: false
+          sparse-checkout: /.github
+          persist-credentials: false
+
+      - name: Install libraries
+        uses: ./.github/actions/setup/macos
+
+      - uses: ./.github/actions/setup/directories
+        with:
+          srcdir: src
+          builddir: build
+          makeup: true
+          dummy-files: true
+          fetch-depth: 10
+
+      - name: Run configure
+        run: ../src/configure -C --disable-install-doc --enable-yjit=dev
+
+      - run: make
+
+      - name: Set ENV for YJIT
+        run: |
+          echo "RUBY_YJIT_ENABLE=1" >> $GITHUB_ENV
+          echo "RUBY_CRASH_REPORT=$(pwd)/rb_crash_%p.txt" >> $GITHUB_ENV
+
+      - name: Hammer test_concurrent_binwrite_shareable_string under suite load
+        run: |
+          set -x
+          RUNRUBY="./miniruby -I../src/lib -I. -I.ext/common ../src/tool/runruby.rb --extout=.ext -- $RUN_OPTS"
+          start_load() {
+            (make -s test-all TESTOPTS="-j4 -q --tty=no" RUN_OPTS="$RUN_OPTS" > load.log 2>&1 || true) &
+            LOAD=$!
+          }
+          start_load
+          end=$((SECONDS + 300 * 60))
+          n=0
+          failed=0
+          while [ $SECONDS -lt $end ]; do
+            n=$((n + 1))
+            if ! $RUNRUBY -r../src/tool/lib/_tmpdir ../src/test/runner.rb --ruby="$RUNRUBY" \
+                   --excludes-dir=../src/test/.excludes --name='!/memory_leak/' -q --tty=no \
+                   ruby/test_ractor.rb -n /test_concurrent_binwrite/ > hammer.log 2>&1; then
+              failed=1
+              echo "=== hammer run $n failed"
+              cat hammer.log
+              break
+            fi
+            kill -0 $LOAD 2>/dev/null || start_load
+          done
+          echo "=== hammer runs: $n failed: $failed"
+          kill $LOAD 2>/dev/null || true
+          wait $LOAD 2>/dev/null || true
+          ls rb_crash_*.txt 2>/dev/null && failed=1
+          exit $failed
+        timeout-minutes: 330
+        env:
+          RUBY_TESTOPTS: '-q --tty=no'
+          PRECHECK_BUNDLED_GEMS: 'no'
+
+      - name: Dump crash logs
+        if: ${{ failure() }}
+        continue-on-error: true
+        run: |
+          tail --verbose --lines=+1 rb_crash_*.txt
+          exit 1
