@@ -28,6 +28,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 355
 
+    defaults:
+      run:
+        working-directory: build
+
     env:
       GITPULLOPTIONS: --no-tags origin ${{ github.ref }}
       RUN_OPTS: '--yjit-call-threshold=1 --yjit-verify-ctx --yjit-code-gc'
