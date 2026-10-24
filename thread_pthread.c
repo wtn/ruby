@@ -811,9 +811,19 @@ native_thread_create0(struct rb_native_thread *nt)
 # endif
     CHECK_ERR(pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED));
 
-    err = pthread_create(&nt->thread_id, &attr, nt_start, nt);
+    // pthread_create stores the new thread's id through its first argument
+    // only after the thread is already running.  A shared nt that finds no
+    // work retires and frees itself from nt_start, and a dedicated one is
+    // freed by its thread's epilogue, so that late store could land in memory
+    // already reused by someone else.  Take the id into a local here and let
+    // the new thread record its own in nt_start, before it can do anything.
+    rb_nativethread_id_t thread_id;
+#if USE_RUBY_DEBUG_LOG
+    const rb_atomic_t serial = nt->serial;
+#endif
+    err = pthread_create(&thread_id, &attr, nt_start, nt);
 
-    RUBY_DEBUG_LOG("nt:%d err:%d", (int)nt->serial, err);
+    RUBY_DEBUG_LOG("nt:%d err:%d", (int)serial, err);
 
     CHECK_ERR(pthread_attr_destroy(&attr));
 
@@ -1121,6 +1131,8 @@ native_thread_native_thread_id(rb_thread_t *target_th)
     return INT2FIX(tid);
 #elif defined(__APPLE__)
     uint64_t tid;
+    // Not yet recorded by nt_start: the thread has not started, as with tid above.
+    if (!target_th->nt->thread_id) return Qnil;
     int e = pthread_threadid_np(target_th->nt->thread_id, &tid);
     if (e != 0) rb_syserr_fail(e, "pthread_threadid_np");
     return ULL2NUM((unsigned long long)tid);

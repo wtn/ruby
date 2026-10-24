@@ -1980,6 +1980,10 @@ nt_start(void *ptr)
     struct rb_native_thread *nt = (struct rb_native_thread *)ptr;
     rb_vm_t *vm = nt->vm;
 
+    // Recorded here, not by the creator's pthread_create (native_thread_create0):
+    // this thread may retire and free nt before that call returns.
+    nt->thread_id = pthread_self();
+
     native_thread_setup_on_thread(nt);
 
     // init tid
