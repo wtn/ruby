@@ -3989,6 +3989,14 @@ rb_thread_setname(VALUE thread, VALUE name)
     if (threadptr_initialized(target_th) && target_th->has_dedicated_nt) {
         // 0 until the new thread records it; thread_do_start names it then
         rb_nativethread_id_t thread_id = ACCESS_ONCE(rb_nativethread_id_t, target_th->nt->thread_id);
+        // DIAGNOSTIC ONLY (naming branch): for the test's own threads
+        // ("name0".."name9"; Timeout's watcher also hits this path), log the
+        // zero-id path, or take it unguarded to see whether the test notices
+        const char *diag = getenv("SETNAME_DIAG");
+        if (diag && !thread_id && !NIL_P(name) && strncmp(RSTRING_PTR(name), "name", 4) == 0) {
+            fprintf(stderr, "SETNAME_ZERO %s\n", RSTRING_PTR(name));
+            if (strcmp(diag, "noguard") == 0) native_set_another_thread_name(thread_id, name);
+        }
         if (thread_id) native_set_another_thread_name(thread_id, name);
     }
     return name;

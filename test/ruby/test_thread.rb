@@ -1442,6 +1442,25 @@ q.pop
     end;
   end
 
+  # DIAGNOSTIC ONLY (naming branch): the test above with the child pinned to one CPU
+  def test_thread_name_set_before_start_pinned
+    omit "needs /proc/self/task" unless File.directory?("/proc/self/task")
+    cpu = File.read("/proc/self/status")[/^Cpus_allowed_list:\s*(\d+)/, 1]
+    assert_separately([{'RUBY_MN_THREADS' => '0'}], "#{<<~"begin;"}\n#{<<~'end;'}", timeout: 30, precommand: ["taskset", "-c", cpu])
+    begin;
+      10.times do |i|
+        q = Thread::Queue.new
+        t = Thread.new do
+          q.pop
+          File.read("/proc/self/task/#{Thread.current.native_thread_id}/comm").chomp
+        end
+        t.name = "name#{i}"
+        q << true
+        assert_equal "name#{i}", t.value
+      end
+    end;
+  end
+
   def test_thread_invalid_name
     bug11756 = '[ruby-core:71774] [Bug #11756]'
     t = Thread.start {}
