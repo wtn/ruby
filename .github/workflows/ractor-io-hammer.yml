@@ -23,7 +23,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        copy: [1, 2, 3]
+        include:
+          - variant: plain
+            configure: '--enable-yjit=dev'
+            yjit: '1'
+            hammer_env: ''
+          - variant: checkmode
+            configure: '--enable-yjit=dev cppflags=-DRGENGC_CHECK_MODE=1'
+            yjit: '1'
+            hammer_env: ''
+          - variant: scribble
+            configure: '--enable-yjit=dev'
+            yjit: '1'
+            hammer_env: 'MallocScribble=1 MallocPreScribble=1 MallocCheckHeapStart=1000 MallocCheckHeapEach=10000 MallocErrorAbort=1'
+          - variant: asan
+            configure: '--disable-yjit --disable-zjit cflags=-fsanitize=address\ -fno-omit-frame-pointer LDFLAGS=-fsanitize=address'
+            yjit: ''
+            hammer_env: 'ASAN_OPTIONS=detect_leaks=0:abort_on_error=1:halt_on_error=1'
 
     runs-on: macos-26
     timeout-minutes: 355
@@ -55,14 +71,17 @@ jobs:
           fetch-depth: 10
 
       - name: Run configure
-        run: ../src/configure -C --disable-install-doc --enable-yjit=dev
+        run: ../src/configure -C --disable-install-doc ${{ matrix.configure }}
 
       - run: make
 
       - name: Set ENV for YJIT
         run: |
-          echo "RUBY_YJIT_ENABLE=1" >> $GITHUB_ENV
+          test -n "${{ matrix.yjit }}" && echo "RUBY_YJIT_ENABLE=1" >> $GITHUB_ENV || true
           echo "RUBY_CRASH_REPORT=$(pwd)/rb_crash_%p.txt" >> $GITHUB_ENV
+
+      - name: Build the open/close interposer
+        run: clang -dynamiclib -O1 -g -o "$GITHUB_WORKSPACE/closelog.dylib" ../src/.github/ractor-io-diag/closelog.c
 
       - name: Hammer test_concurrent_binwrite_shareable_string under suite load
         run: |
@@ -79,7 +98,8 @@ jobs:
           failed=0
           while [ $SECONDS -lt $end ] && [ $failed -lt 5 ]; do
             n=$((n + 1))
-            if ! $RUNRUBY -r../src/tool/lib/_tmpdir ../src/test/runner.rb --ruby="$RUNRUBY" \
+            if ! env ${{ matrix.hammer_env }} DYLD_INSERT_LIBRARIES="$GITHUB_WORKSPACE/closelog.dylib" CLOSELOG_DIR="$GITHUB_WORKSPACE/diag" \
+                 $RUNRUBY -r../src/tool/lib/_tmpdir ../src/test/runner.rb --ruby="$RUNRUBY" \
                    --excludes-dir=../src/test/.excludes --name='!/memory_leak/' -q --tty=no \
                    ruby/test_ractor.rb -n /test_concurrent_binwrite/ > hammer.log 2>&1; then
               failed=$((failed + 1))
@@ -118,6 +138,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
-          name: ractor-io-diag-${{ matrix.copy }}
+          name: ractor-io-diag-${{ matrix.variant }}
           path: ${{ github.workspace }}/diag
           if-no-files-found: ignore

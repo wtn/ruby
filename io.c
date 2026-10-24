@@ -7559,6 +7559,12 @@ rb_file_open_generic(VALUE io, VALUE filename, int oflags, enum rb_io_mode fmode
     validate_enc_binmode(&fmode, convconfig->ecflags,
                          convconfig->enc, convconfig->enc2);
 
+    if (RFILE(io)->fptr) {
+        rb_io_t *dfp = RFILE(io)->fptr;
+        fprintf(stderr, "[RACTOR-DIAG] fresh File %p already has fptr %p (self=%p fd=%d mode=%x): slot handed out twice?\n",
+                (void *)io, (void *)dfp, (void *)dfp->self, dfp->fd, (unsigned)dfp->mode);
+        rb_bug("[RACTOR-DIAG] fresh File already has an fptr");
+    }
     MakeOpenFile(io, fptr);
     fptr->mode = fmode;
     fptr->encs = *convconfig;

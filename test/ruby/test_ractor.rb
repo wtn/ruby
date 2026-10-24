@@ -519,14 +519,19 @@ class TestRactor < Test::Unit::TestCase
       require "tmpdir"
 
       Dir.mktmpdir do |dir|
-        50.times do
+        50.times do |round|
           str = Ractor.make_shareable(Random.bytes(512 * 1024))
 
           go = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 0.02
           12.times.map do |n|
-            Ractor.new(str, File.join(dir, "w#{n}"), go) do |s, path, at|
+            Ractor.new(str, File.join(dir, "w#{n}"), go, round, n) do |s, path, at, round, n|
               Thread.pass until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= at
-              File.binwrite(path, s)
+              begin
+                File.binwrite(path, s)
+              rescue Exception => e
+                $stderr.puts "[ractor-io-diag] round=#{round} ractor=#{n} pid=#{$$} #{e.class}: #{e.message}"
+                raise
+              end
             end
           end.each(&:join)
 
