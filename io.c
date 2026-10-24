@@ -5724,6 +5724,7 @@ maygvl_fclose(FILE *file, int keepgvl)
 
 static void free_io_buffer(rb_io_buffer_t *buf);
 
+static int diag_fd_closing(rb_io_t *fp, int fd);
 static void
 fptr_finalize_flush(rb_io_t *fptr, int noraise, int keepgvl)
 {
@@ -5806,7 +5807,16 @@ fptr_finalize_flush(rb_io_t *fptr, int noraise, int keepgvl)
 
         keepgvl |= !(mode & FMODE_WRITABLE);
         keepgvl |= noraise;
-        if ((maygvl_close(fd, keepgvl) < 0) && NIL_P(error)) {
+        int diag_registered = diag_fd_closing(fptr, fd);
+        int diag_close_ret = maygvl_close(fd, keepgvl);
+        int diag_close_errno = errno;
+        if (diag_close_ret < 0 && diag_registered) {
+            fprintf(stderr, "[RACTOR-DIAG] close(%d) failed with errno %d on a registered fd: fptr=%p self=%p mode=%x\n",
+                    fd, diag_close_errno, (void *)fptr, (void *)fptr->self, (unsigned)mode);
+            rb_bug("[RACTOR-DIAG] close failed on a registered fd");
+        }
+        errno = diag_close_errno;
+        if ((diag_close_ret < 0) && NIL_P(error)) {
             if (!noraise) {
                 error = INT2NUM(errno);
             }
@@ -5892,6 +5902,78 @@ rb_io_fptr_cleanup_all(rb_io_t *fptr)
     clear_codeconv(fptr);
 }
 
+/* RACTOR-DIAG: fd ownership and live-fptr registries. */
+#define DIAG_FD_MAX 65536
+#define DIAG_LIVE_MAX 8192
+static rb_io_t *diag_fd_owner[DIAG_FD_MAX];
+static rb_io_t *diag_live_fptrs[DIAG_LIVE_MAX];
+static int diag_live_n;
+static rb_nativethread_lock_t diag_lock = RB_NATIVETHREAD_LOCK_INIT;
+
+static void
+diag_fptr_born(rb_io_t *fp)
+{
+    rb_native_mutex_lock(&diag_lock);
+    for (int i = 0; i < diag_live_n; i++) {
+        if (diag_live_fptrs[i] == fp) {
+            fprintf(stderr, "[RACTOR-DIAG] malloc returned a live rb_io_t %p (self=%p fd=%d mode=%x)\n",
+                    (void *)fp, (void *)fp->self, fp->fd, (unsigned)fp->mode);
+            rb_native_mutex_unlock(&diag_lock);
+            rb_bug("[RACTOR-DIAG] malloc returned a live rb_io_t");
+        }
+    }
+    if (diag_live_n < DIAG_LIVE_MAX) diag_live_fptrs[diag_live_n++] = fp;
+    rb_native_mutex_unlock(&diag_lock);
+}
+
+static void
+diag_fptr_died(rb_io_t *fp)
+{
+    rb_native_mutex_lock(&diag_lock);
+    for (int i = 0; i < diag_live_n; i++) {
+        if (diag_live_fptrs[i] == fp) {
+            diag_live_fptrs[i] = diag_live_fptrs[--diag_live_n];
+            break;
+        }
+    }
+    rb_native_mutex_unlock(&diag_lock);
+}
+
+static void
+diag_fd_opened(rb_io_t *fp, int fd)
+{
+    if (fd < 0 || fd >= DIAG_FD_MAX) return;
+    rb_native_mutex_lock(&diag_lock);
+    rb_io_t *prev = diag_fd_owner[fd];
+    if (prev && prev != fp) {
+        fprintf(stderr, "[RACTOR-DIAG] fd %d returned by open() is still owned by live rb_io_t %p (self=%p fd=%d mode=%x); new fptr %p\n",
+                fd, (void *)prev, (void *)prev->self, prev->fd, (unsigned)prev->mode, (void *)fp);
+        rb_native_mutex_unlock(&diag_lock);
+        rb_bug("[RACTOR-DIAG] fd handed out twice");
+    }
+    diag_fd_owner[fd] = fp;
+    rb_native_mutex_unlock(&diag_lock);
+}
+
+/* Returns whether fd was registered to this fptr. */
+static int
+diag_fd_closing(rb_io_t *fp, int fd)
+{
+    if (fd < 0 || fd >= DIAG_FD_MAX) return 0;
+    rb_native_mutex_lock(&diag_lock);
+    rb_io_t *owner = diag_fd_owner[fd];
+    if (owner && owner != fp) {
+        fprintf(stderr, "[RACTOR-DIAG] rb_io_t %p (self=%p mode=%x) is closing fd %d owned by live rb_io_t %p (self=%p fd=%d mode=%x)\n",
+                (void *)fp, (void *)fp->self, (unsigned)fp->mode, fd, (void *)owner, (void *)owner->self, owner->fd, (unsigned)owner->mode);
+        rb_native_mutex_unlock(&diag_lock);
+        rb_bug("[RACTOR-DIAG] closing another fptr's fd");
+    }
+    int registered = owner == fp;
+    if (registered) diag_fd_owner[fd] = NULL;
+    rb_native_mutex_unlock(&diag_lock);
+    return registered;
+}
+
 #define DIAG_POISON_FD (-0x5aa5)
 #define DIAG_POISON_MODE (0x5aa50000)
 int
@@ -5907,6 +5989,7 @@ rb_io_fptr_finalize(struct rb_io *io)
         rb_bug("[RACTOR-DIAG] double free of rb_io_t");
     }
     rb_io_fptr_cleanup_all(io);
+    diag_fptr_died(io);
     io->fd = DIAG_POISON_FD;
     io->mode = DIAG_POISON_MODE;
     io->self = Qundef;
@@ -7496,6 +7579,7 @@ rb_file_open_generic(VALUE io, VALUE filename, int oflags, enum rb_io_mode fmode
         fptr->mode &= ~(1 << 30);
         if (dstate) rb_jump_tag(dstate);
         fptr->fd = (int)dfd;
+        diag_fd_opened(fptr, fptr->fd);
     }
     io_check_tty(fptr);
     if (fmode & FMODE_SETENC_BY_BOM) io_set_encoding_by_bom(io);
@@ -9665,6 +9749,7 @@ static inline rb_io_t *
 rb_io_fptr_new(void)
 {
     rb_io_t *fp = ALLOC(rb_io_t);
+    diag_fptr_born(fp);
     fp->self = Qnil;
     fp->fd = -1;
     fp->stdio_file = NULL;

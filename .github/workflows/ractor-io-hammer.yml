@@ -67,40 +67,57 @@ jobs:
       - name: Hammer test_concurrent_binwrite_shareable_string under suite load
         run: |
           set -x
+          mkdir -p "$GITHUB_WORKSPACE/diag"
           RUNRUBY="./miniruby -I../src/lib -I. -I.ext/common ../src/tool/runruby.rb --extout=.ext -- $RUN_OPTS"
           start_load() {
-            (make -s test-all TESTOPTS="-j4 -q --tty=no" RUN_OPTS="$RUN_OPTS" > load.log 2>&1 || true) &
+            (RUBY_CRASH_REPORT="$(pwd)/load_crash_%p.txt" RUBY_ON_BUG="" make -s test-all TESTOPTS="-j4 -q --tty=no" RUN_OPTS="$RUN_OPTS" > load.log 2>&1 || true) &
             LOAD=$!
           }
           start_load
           end=$((SECONDS + 300 * 60))
           n=0
           failed=0
-          while [ $SECONDS -lt $end ]; do
+          while [ $SECONDS -lt $end ] && [ $failed -lt 5 ]; do
             n=$((n + 1))
             if ! $RUNRUBY -r../src/tool/lib/_tmpdir ../src/test/runner.rb --ruby="$RUNRUBY" \
                    --excludes-dir=../src/test/.excludes --name='!/memory_leak/' -q --tty=no \
                    ruby/test_ractor.rb -n /test_concurrent_binwrite/ > hammer.log 2>&1; then
-              failed=1
-              echo "=== hammer run $n failed"
+              failed=$((failed + 1))
+              echo "=== hammer run $n failed (failure $failed)"
               cat hammer.log
-              break
+              cp hammer.log "$GITHUB_WORKSPACE/diag/hammer-fail-$failed-run-$n.log"
+              cp rb_crash_*.txt "$GITHUB_WORKSPACE/diag/" 2>/dev/null || true
+              rm -f rb_crash_*.txt
             fi
             kill -0 $LOAD 2>/dev/null || start_load
           done
           echo "=== hammer runs: $n failed: $failed"
           kill $LOAD 2>/dev/null || true
           wait $LOAD 2>/dev/null || true
-          ls rb_crash_*.txt 2>/dev/null && failed=1
-          exit $failed
+          cp ~/Library/Logs/DiagnosticReports/ruby* "$GITHUB_WORKSPACE/diag/" 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE"/lldb.*.log "$GITHUB_WORKSPACE/diag/" 2>/dev/null || true
+          ls -la "$GITHUB_WORKSPACE/diag"
+          test $failed -eq 0
         timeout-minutes: 330
         env:
           RUBY_TESTOPTS: '-q --tty=no'
           PRECHECK_BUNDLED_GEMS: 'no'
+          # The Ruby crash handler double-faulted on the first SIGSEGV; attach lldb
+          # from outside and print every thread's backtrace before the process dies.
+          RUBY_ON_BUG: >-
+            sh -c 'cd ${{ github.workspace }} && [ $(ls lldb.*.log 2>/dev/null | wc -l) -lt 20 ] &&
+            lldb --batch -p $0 -o "thread backtrace all" -o "register read" -o detach > lldb.$0.log 2>&1'
 
-      - name: Dump crash logs
-        if: ${{ failure() }}
+      - name: Dump diagnostics
+        if: ${{ always() }}
         continue-on-error: true
         run: |
-          tail --verbose --lines=+1 rb_crash_*.txt
-          exit 1
+          for f in "$GITHUB_WORKSPACE"/diag/*; do echo "==> $f <=="; head -c 200000 "$f"; echo; done
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: ractor-io-diag-${{ matrix.copy }}
+          path: ${{ github.workspace }}/diag
+          if-no-files-found: ignore
