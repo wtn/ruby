@@ -3054,8 +3054,10 @@ num_step(int argc, VALUE *argv, VALUE from)
         long diff = FIX2LONG(step);
 
         if (inf) {
-            for (;; i += diff)
+            for (; FIXABLE(i); i += diff)
                 rb_yield(LONG2FIX(i));
+            for (VALUE v = LONG2NUM(i);; v = rb_big_plus(v, step))
+                rb_yield(v);
         }
         else {
             long end = FIX2LONG(to);

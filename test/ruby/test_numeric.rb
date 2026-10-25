@@ -376,6 +376,28 @@ class TestNumeric < Test::Unit::TestCase
     assert_step [10.0, 9.0, 8.0, 7.0], [10.0, nil, -1], inf: true
   end
 
+  def test_step_infinite_fixnum_overflow
+    min, max = RbConfig::LIMITS.values_at("FIXNUM_MIN", "FIXNUM_MAX")
+    assert_step [max, max + 1, max + 2], [max], inf: true
+    assert_step [max, max + 1, max + 2], [max, by: 1], inf: true
+    assert_step [max, max + 1, max + 2], [max, nil, 1], inf: true
+    assert_step [max - 1, max + 1, max + 3], [max - 1, by: 2], inf: true
+    assert_step [0, max, max * 2, max * 3, max * 4], [0, by: max], inf: true
+
+    assert_step [min, min - 1, min - 2], [min, by: -1], inf: true
+    assert_step [min, min - 1, min - 2], [min, nil, -1], inf: true
+    assert_step [min + 1, min - 1, min - 3], [min + 1, by: -2], inf: true
+    assert_step [0, min, min * 2, min * 3, min * 4], [0, by: min], inf: true
+
+    a = []
+    max.step(Float::INFINITY) { |x| a << x; break if a.size == 3 }
+    assert_equal [max, max + 1, max + 2], a
+
+    a = []
+    min.step(-Float::INFINITY, -1) { |x| a << x; break if a.size == 3 }
+    assert_equal [min, min - 1, min - 2], a
+  end
+
   def test_num2long
     assert_raise(TypeError) { 1 & nil }
     assert_raise(TypeError) { 1 & 1.0 }
