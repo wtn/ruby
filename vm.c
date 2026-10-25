@@ -1387,8 +1387,8 @@ proc_create(VALUE klass, const struct rb_block *block, int8_t is_from_method, in
     return procval;
 }
 
-VALUE
-rb_proc_dup_0(VALUE self)
+static VALUE
+proc_dup_block(VALUE self)
 {
     VALUE procval;
     rb_proc_t *src;
@@ -1410,6 +1410,13 @@ rb_proc_dup_0(VALUE self)
         dst->header.is_refined = 1;
     }
 
+    return procval;
+}
+
+VALUE
+rb_proc_dup_0(VALUE self)
+{
+    VALUE procval = proc_dup_block(self);
     if (RB_OBJ_SHAREABLE_P(self)) RB_OBJ_SET_SHAREABLE(procval);
     RB_GC_GUARD(self); /* for: body = rb_proc_dup(body) */
     return procval;
@@ -1418,9 +1425,12 @@ rb_proc_dup_0(VALUE self)
 VALUE
 rb_proc_dup(VALUE self)
 {
-    VALUE procval = rb_proc_dup_0(self);
+    VALUE procval = proc_dup_block(self);
     VALUE recipe = rb_proc_refinements_recipe(self);
     if (!NIL_P(recipe)) rb_proc_set_refinements_recipe(procval, recipe);
+    /* after the recipe write, since a shareable Proc's ivars are frozen */
+    if (RB_OBJ_SHAREABLE_P(self)) RB_OBJ_SET_SHAREABLE(procval);
+    RB_GC_GUARD(self); /* for: body = rb_proc_dup(body) */
     return procval;
 }
 

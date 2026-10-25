@@ -686,6 +686,23 @@ class TestProc < Test::Unit::TestCase
     RUBY
   end
 
+  def test_refined_shareable_copied_by_block_pass
+    assert_separately([], <<~'RUBY')
+      Warning[:experimental] = false
+      module RefMod; refine(String) { def shout = upcase + "!" }; end
+      refined = Ractor.make_shareable(nil.instance_exec { ->(s) { s.shout } }.refined(RefMod))
+
+      copy = Ractor.shareable_proc(&refined)
+      refute_same(refined, copy)
+      assert_send([Ractor, :shareable?, copy])
+      assert_equal("HI!", copy.call("hi"))
+
+      copy = Class.new(Proc).new(&refined)
+      assert_send([Ractor, :shareable?, copy])
+      assert_equal("HI!", copy.call("hi"))
+    RUBY
+  end
+
   def test_refined_coverage
     assert_separately(%w[-rcoverage -rtempfile], <<~'RUBY')
       f = Tempfile.open(["refined_coverage", ".rb"])
