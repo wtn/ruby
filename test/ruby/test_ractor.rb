@@ -82,6 +82,70 @@ class TestRactor < Test::Unit::TestCase
 =end
   end
 
+  def test_make_shareable_proc_with_unshareable_ivar
+    pr = nil.instance_exec { proc {} }
+    pr.instance_variable_set(:@mutex, Thread::Mutex.new)
+    assert_unshareable(pr, /can not make shareable object for #<Thread::Mutex/, exception: Ractor::Error)
+
+    raiser = Class.new do
+      def freeze
+        raise "boom"
+      end
+    end
+    pr = nil.instance_exec { proc {} }
+    pr.instance_variable_set(:@raiser, raiser.new)
+    assert_unshareable(pr, "boom", exception: RuntimeError)
+
+    pr = nil.instance_exec { proc {} }
+    pr.instance_variable_set(:@str, +"str")
+    assert_make_shareable(pr)
+    assert Ractor.shareable?(pr.instance_variable_get(:@str))
+  end
+
+  def test_make_shareable_proc_reached_twice
+    pr = nil.instance_exec { a = 1; proc { a } }
+    pr.instance_variable_set(:@self, pr)
+    assert_make_shareable(pr)
+    assert_equal 1, pr.call
+
+    pr = nil.instance_exec { a = 1; b = 2; proc { a + b } }
+    ary = [pr, pr]
+    assert_make_shareable(ary)
+    assert_equal [3, 3], ary.map(&:call)
+
+    fail_freeze = true
+    raiser = Class.new do
+      define_method(:freeze) do
+        raise "boom" if fail_freeze
+        super()
+      end
+    end
+    pr = nil.instance_exec { a = 1; proc { a } }
+    pr.instance_variable_set(:@raiser, raiser.new)
+    assert_unshareable(pr, "boom", exception: RuntimeError)
+    fail_freeze = false
+    assert_make_shareable(pr)
+    assert_equal 1, pr.call
+  end
+
+  def test_make_shareable_proc_capturing_proc_from_same_walk
+    b = nil.instance_exec { proc { 1 } }
+    a = nil.instance_exec { proc { b.call + 1 } }
+    assert_make_shareable([b, a])
+    assert_equal 2, a.call
+
+    d = nil.instance_exec { proc { 1 } }
+    d.instance_variable_set(:@n, 1)
+    c = nil.instance_exec { proc { d.call + 1 } }
+    assert_make_shareable([d, c])
+    assert_equal 2, c.call
+
+    v = nil.instance_exec { ->(x) { x > 0 } }
+    h = nil.instance_exec { {validate: v, run: ->(x) { v.(x) }} }
+    assert_make_shareable(h)
+    assert_equal true, h[:run].(1)
+  end
+
   def test_shareable_proc_define_method_super_method_missing
     assert_ractor(<<~'RUBY', timeout: 30)
       iterations = 1_000_000

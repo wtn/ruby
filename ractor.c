@@ -1962,6 +1962,7 @@ make_shareable_check_shareable(VALUE obj)
             }
         }
         else if (rb_obj_is_proc(obj)) {
+            // with unshareable ivars, mark_shareable sets the flag once the whole walk succeeds
             rb_proc_ractor_make_shareable(obj, Qundef);
             return traverse_cont;
         }

@@ -1676,6 +1676,31 @@ rb_proc_isolate(VALUE self)
     return dst;
 }
 
+static int
+proc_unshareable_ivar_i(ID name, VALUE val, st_data_t arg)
+{
+    if (!rb_ractor_shareable_p(val)) {
+        *(bool *)arg = true;
+        return ST_STOP;
+    }
+    return ST_CONTINUE;
+}
+
+// With an unshareable ivar, leave the flag to Ractor.make_shareable, which
+// sets it after making the ivars shareable.
+static VALUE
+proc_ractor_freeze_shareable(VALUE self)
+{
+    bool unshareable_ivar = false;
+    if (UNLIKELY(rb_obj_shape_has_ivars(self))) {
+        rb_ivar_foreach(self, proc_unshareable_ivar_i, (st_data_t)&unshareable_ivar);
+    }
+
+    RB_OBJ_FREEZE(self);
+    if (!unshareable_ivar) RB_OBJ_SET_SHAREABLE(self);
+    return self;
+}
+
 VALUE
 rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
 {
@@ -1685,6 +1710,11 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
         rb_proc_t *proc = (rb_proc_t *)RTYPEDDATA_DATA(self);
 
         if (proc->block.type != block_type_iseq) rb_raise(rb_eRuntimeError, "not supported yet");
+
+        // isolated by an earlier visit of the walk, or by a failed walk
+        if (UNDEF_P(replace_self) && proc->header.is_isolated && RB_OBJ_FROZEN_RAW(self)) {
+            return proc_ractor_freeze_shareable(self);
+        }
 
         if (!UNDEF_P(replace_self)) {
             RB_OBJ_WRITE(self, &proc->block.as.captured.self, replace_self);
@@ -1718,8 +1748,7 @@ rb_proc_ractor_make_shareable(VALUE self, VALUE replace_self)
         }
     }
 
-    RB_OBJ_SET_FROZEN_SHAREABLE(self);
-    return self;
+    return proc_ractor_freeze_shareable(self);
 }
 
 VALUE
