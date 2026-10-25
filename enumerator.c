@@ -4052,11 +4052,12 @@ rb_arithmetic_sequence_beg_len_step(VALUE obj, rb_len_t *begp, rb_len_t *lenp, r
 }
 
 static bool
-infinite_end_p(VALUE e)
+infinite_end_p(VALUE e, VALUE s)
 {
     if (NIL_P(e)) return true;
     if (RB_FLOAT_TYPE_P(e)) {
-        return isinf(NUM2DBL(e));
+        double d = RFLOAT_VALUE(e);
+        return isinf(d) && (d < 0) == rb_int_negative_p(s);
     }
     return false;
 }
@@ -4081,21 +4082,21 @@ arith_seq_take(VALUE self, VALUE num)
     s = arith_seq_step(self);
     x = arith_seq_exclude_end_p(self);
 
-    if (FIXNUM_P(b) && infinite_end_p(e) && FIXNUM_P(s)) {
-        long i = FIX2LONG(b), unit = FIX2LONG(s);
+    if (RB_INTEGER_TYPE_P(b) && RB_INTEGER_TYPE_P(s) && infinite_end_p(e, s)) {
         ary = rb_ary_new_capa(n);
-        while (n > 0 && FIXABLE(i)) {
-            rb_ary_push(ary, LONG2FIX(i));
-            i += unit;  // FIXABLE + FIXABLE never overflow;
-            --n;
-        }
-        if (n > 0) {
-            b = LONG2NUM(i);
-            while (n > 0) {
-                rb_ary_push(ary, b);
-                b = rb_big_plus(b, s);
+        if (FIXNUM_P(b) && FIXNUM_P(s)) {
+            long i = FIX2LONG(b), unit = FIX2LONG(s);
+            while (n > 0 && FIXABLE(i)) {
+                rb_ary_push(ary, LONG2FIX(i));
+                i += unit;  // FIXABLE + FIXABLE never overflow;
                 --n;
             }
+            if (n > 0) b = LONG2NUM(i);
+        }
+        while (n > 0) {
+            rb_ary_push(ary, b);
+            b = rb_int_plus(b, s);
+            --n;
         }
         return ary;
     }

@@ -201,6 +201,53 @@ class TestArithmeticSequence < Test::Unit::TestCase
     assert_equal([1.0, 2.0, 3.0, 4.0, 5.0], seq.first(5), bug15518)
   end
 
+  def test_first_bug19231
+    bug19231 = '[Bug #19231]'
+    three_integer_classes = Array.new(3) { Integer }
+    three_float_classes = Array.new(3) { Float }
+
+    seq = 0.step(Float::INFINITY, 10)
+    assert_instance_of(Integer, seq.first, bug19231)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([0, 10, 20], seq.first(3), bug19231)
+    assert_equal(three_integer_classes, seq.take(3).map(&:class), bug19231)
+    assert_equal(three_integer_classes, seq.lazy.first(3).map(&:class), bug19231)
+
+    seq = 0.step(-Float::INFINITY, -10)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([0, -10, -20], seq.first(3), bug19231)
+
+    seq = (0 .. Float::INFINITY).step(10)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([0, 10, 20], seq.first(3), bug19231)
+
+    seq = (0 ... Float::INFINITY).step(10)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([0, 10, 20], seq.first(3), bug19231)
+
+    bignum = 2**64
+    seq = bignum.step(Float::INFINITY, 10)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([bignum, bignum + 10, bignum + 20], seq.first(3), bug19231)
+
+    seq = 0.step(Float::INFINITY, bignum)
+    assert_equal(three_integer_classes, seq.first(3).map(&:class), bug19231)
+    assert_equal([0, bignum, bignum * 2], seq.first(3), bug19231)
+
+    seq = (-bignum).step(Float::INFINITY, bignum / 2)
+    assert_equal([-bignum, -bignum / 2, 0, bignum / 2], seq.first(4), bug19231)
+
+    assert_equal([], 0.step(Float::INFINITY, -10).first(3), bug19231)
+    assert_equal([], 0.step(-Float::INFINITY, 10).first(3), bug19231)
+    assert_equal([], bignum.step(Float::INFINITY, -10).first(3), bug19231)
+    assert_equal([], (0 .. -Float::INFINITY).step(10).first(3), bug19231)
+
+    seq = 0.0.step(Float::INFINITY, 10)
+    assert_equal(three_float_classes, seq.first(3).map(&:class), bug19231)
+    seq = 0.step(Float::INFINITY, 10.0)
+    assert_equal(three_float_classes, seq.first(3).map(&:class), bug19231)
+  end
+
   def test_last
     seq = 1.step(10)
     assert_equal(10, seq.last)

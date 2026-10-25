@@ -2779,7 +2779,7 @@ ruby_float_step(VALUE from, VALUE to, VALUE step, int excl, int allow_endless)
             }
             do {
                 rb_yield(val);
-                val = rb_big_plus(val, step);
+                val = rb_int_plus(val, step);
             } while (1);
         }
         else {

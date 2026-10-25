@@ -579,6 +579,27 @@ class TestRange < Test::Unit::TestCase
     assert_equal([10.0, 9.0, 8.0, 7.0], (10.0 ..).step(-1).take(4))
   end
 
+  def test_step_bug19231
+    bug19231 = '[Bug #19231]'
+    three_integer_classes = Array.new(3) { Integer }
+
+    a = []
+    (0 .. Float::INFINITY).step(10) { |x| a << x; break if a.size == 3 }
+    assert_equal(three_integer_classes, a.map(&:class), bug19231)
+    assert_equal([0, 10, 20], a, bug19231)
+
+    a = []
+    (0 ... Float::INFINITY).step(10) { |x| a << x; break if a.size == 3 }
+    assert_equal(three_integer_classes, a.map(&:class), bug19231)
+    assert_equal([0, 10, 20], a, bug19231)
+
+    assert_equal(three_integer_classes, (0 .. Float::INFINITY).step(10).take(3).map(&:class), bug19231)
+
+    a = []
+    (0.0 .. Float::INFINITY).step(10) { |x| a << x; break if a.size == 3 }
+    assert_equal(Array.new(3) { Float }, a.map(&:class), bug19231)
+  end
+
   def test_percent_step
     aseq = (1..10) % 2
     assert_equal(Enumerator::ArithmeticSequence, aseq.class)

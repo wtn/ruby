@@ -376,6 +376,43 @@ class TestNumeric < Test::Unit::TestCase
     assert_step [10.0, 9.0, 8.0, 7.0], [10.0, nil, -1], inf: true
   end
 
+  def assert_infinite_step_classes(expected, (from, *args))
+    bug19231 = '[Bug #19231]'
+    kw = args.last.is_a?(Hash) ? args.pop : {}
+    xsize = expected.size
+    expected = [expected, expected.map(&:class)]
+
+    a = []
+    from.step(*args, **kw) { |x| a << x; break if a.size == xsize }
+    assert_equal expected, [a, a.map(&:class)], "#{bug19231} step"
+
+    a = []
+    from.step(*args, **kw).each { |x| a << x; break if a.size == xsize }
+    assert_equal expected, [a, a.map(&:class)], "#{bug19231} step enumerator"
+  end
+
+  def test_step_bug19231
+    inf = Float::INFINITY
+    min, max = RbConfig::LIMITS.values_at("FIXNUM_MIN", "FIXNUM_MAX")
+
+    assert_infinite_step_classes [0, 10, 20], [0, inf, 10]
+    assert_infinite_step_classes [0, 10, 20], [0, to: inf, by: 10]
+    assert_infinite_step_classes [0, -10, -20], [0, -inf, -10]
+    assert_infinite_step_classes [0, -10, -20], [0, to: -inf, by: -10]
+
+    assert_infinite_step_classes [max + 1, max + 11, max + 21], [max + 1, inf, 10]
+    assert_infinite_step_classes [min - 1, min - 11, min - 21], [min - 1, -inf, -10]
+    assert_infinite_step_classes [0, 2**64, 2**65], [0, inf, 2**64]
+    assert_infinite_step_classes [-(2**64), -(2**63), 0, 2**63], [-(2**64), inf, 2**63]
+
+    assert_infinite_step_classes [0.0, 10.0, 20.0], [0.0, inf, 10]
+    assert_infinite_step_classes [0.0, 10.0, 20.0], [0, inf, 10.0]
+
+    assert_step [], [0, inf, -10]
+    assert_step [], [0, -inf, 10]
+    assert_step [], [2**64, inf, -10]
+  end
+
   def test_num2long
     assert_raise(TypeError) { 1 & nil }
     assert_raise(TypeError) { 1 & 1.0 }
