@@ -933,6 +933,118 @@ class TestISeq < Test::Unit::TestCase
     RUBY
   end
 
+  def test_short_circuited_jump_in_ensure_keeps_ensure_on_raise
+    assert_separately(["--parser=parse.y"], <<~'RUBY')
+      def logged
+        log = []
+        begin
+          yield log
+        rescue => e
+          log << e.message
+        end
+        log
+      end
+
+      def dead_break(log)
+        while true
+          begin
+            if false && (break if foo); end
+            raise 'boom'
+          ensure
+            log << :ensure
+            exit!(false) if log.size > 1
+          end
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| dead_break(log)}, "break")
+
+      def dead_next(log)
+        while true
+          begin
+            if false && (next if foo); end
+            raise 'boom'
+          ensure
+            log << :ensure
+            exit!(false) if log.size > 1
+          end
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| dead_next(log)}, "next")
+
+      def dead_return(log)
+        begin
+          if false && (return if foo); end
+          raise 'boom'
+        ensure
+          log << :ensure
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| dead_return(log)}, "return")
+
+      def raise_before_dead_break(log)
+        while true
+          begin
+            raise 'boom' if log
+            if false && (break if foo); end
+          ensure
+            log << :ensure
+            exit!(false) if log.size > 1
+          end
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| raise_before_dead_break(log)}, "raise before")
+
+      def two_dead_breaks(log)
+        while true
+          begin
+            if false && (break if foo); end
+            if false && (break if bar); end
+            raise 'boom'
+          ensure
+            log << :ensure
+            exit!(false) if log.size > 1
+          end
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| two_dead_breaks(log)}, "two dead breaks")
+
+      def nested_ensure(log)
+        while true
+          begin
+            begin
+              if false && (break if foo); end
+              raise 'boom'
+            ensure
+              log << :inner
+            end
+          ensure
+            log << :outer
+            exit!(false) if log.size > 2
+          end
+        end
+      end
+      assert_equal([:inner, :outer, 'boom'], logged {|log| nested_ensure(log)}, "nested ensure")
+
+      def dead_break_then_live_break(log, raise_it)
+        while true
+          begin
+            if false && (break if foo); end
+            raise 'boom' if raise_it
+            break
+          ensure
+            log << :ensure
+            exit!(false) if log.size > 1
+          end
+        end
+      end
+      assert_equal([:ensure, 'boom'], logged {|log| dead_break_then_live_break(log, true)}, "dead then live break, raise")
+      assert_equal([:ensure], logged {|log| dead_break_then_live_break(log, false)}, "dead then live break")
+
+      catch_table = RubyVM::InstructionSequence.of(method(:dead_break)).to_a[12]
+      assert_equal(1, catch_table.count {|type, *| type == :ensure}, "split by unreachable break")
+    RUBY
+  end
+
   def test_unreachable_syntax_error
     mesg = /Invalid break/
     assert_syntax_error("false and break", mesg)

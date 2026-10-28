@@ -5085,8 +5085,8 @@ compile_logical(rb_iseq_t *iseq, LINK_ANCHOR *const ret, const NODE *cond,
 }
 
 static int
-compile_branch_condition(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
-                         LABEL *then_label, LABEL *else_label)
+compile_branch_condition0(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
+                          LABEL *then_label, LABEL *else_label)
 {
     int ok;
     DECL_ANCHOR(ignore);
@@ -5101,6 +5101,7 @@ compile_branch_condition(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
             INIT_ANCHOR(ignore);
             ret = ignore;
             then_label = NEW_LABEL(nd_line(cond));
+            ISEQ_COMPILE_DATA(iseq)->in_unreachable = true;
         }
         goto again;
       case NODE_OR:
@@ -5111,6 +5112,7 @@ compile_branch_condition(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
             INIT_ANCHOR(ignore);
             ret = ignore;
             else_label = NEW_LABEL(nd_line(cond));
+            ISEQ_COMPILE_DATA(iseq)->in_unreachable = true;
         }
         goto again;
       case NODE_SYM:
@@ -5179,6 +5181,16 @@ compile_branch_condition(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
     ADD_INSNL(ret, cond, branchunless, else_label);
     ADD_INSNL(ret, cond, jump, then_label);
     return COMPILE_OK;
+}
+
+static int
+compile_branch_condition(rb_iseq_t *iseq, LINK_ANCHOR *ret, const NODE *cond,
+                         LABEL *then_label, LABEL *else_label)
+{
+    bool prev_in_unreachable = ISEQ_COMPILE_DATA(iseq)->in_unreachable;
+    int ok = compile_branch_condition0(iseq, ret, cond, then_label, else_label);
+    ISEQ_COMPILE_DATA(iseq)->in_unreachable = prev_in_unreachable;
+    return ok;
 }
 
 #define HASH_BRACE 1
@@ -6739,8 +6751,12 @@ static void
 add_ensure_range(rb_iseq_t *iseq, struct ensure_range *erange,
                  LABEL *lstart, LABEL *lend)
 {
-    struct ensure_range *ne =
-        compile_data_alloc_type(iseq, struct ensure_range);
+    struct ensure_range *ne;
+
+    /* the jump will be discarded, so the range must not be split */
+    if (ISEQ_COMPILE_DATA(iseq)->in_unreachable) return;
+
+    ne = compile_data_alloc_type(iseq, struct ensure_range);
 
     while (erange->next != 0) {
         erange = erange->next;
