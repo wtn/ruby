@@ -33,7 +33,7 @@ jobs:
           - name: default
           - name: mmtk
             mmtk_build: release
-        os: [macos-26, ubuntu-latest]
+        os: [macos-26, ubuntu-24.04]
         include:
           - test_task: check
       fail-fast: false
