@@ -1396,6 +1396,14 @@ CODE
     assert_nil(S("にんにちは").index(?に, 3))
   end
 
+  def test_index_truncated_char_at_end
+    s = S("a" * 2009 + "\xF0")
+    assert_nil(s.index("needle!!!"))
+    s = S("a" * 2010 + "\xE3")
+    assert_nil(s.index("needle!!!"))
+    assert_nil(s.index("needle!!\xE3"))
+  end
+
   def test_insert
     assert_equal("Xabcd", S("abcd").insert(0, 'X'))
     assert_equal("abcXd", S("abcd").insert(3, 'X'))
