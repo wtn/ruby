@@ -4455,6 +4455,18 @@ class TestString < Test::Unit::TestCase
     refute_predicate buf, :valid_encoding?
   end
 
+  def test_append_bytes_size_overflow
+    require "rbconfig/sizeof"
+    omit "needs 2**64 bytes of arguments" if RbConfig::SIZEOF["rb_len_t"] > 4
+
+    chunk = S("x" * 2**20)
+    buf = S("")
+    assert_raise_with_message(ArgumentError, "string sizes too big") do
+      buf.append_as_bytes(*[chunk] * 4096)
+    end
+    assert_empty buf
+  end
+
   def test_chilled_string
     chilled_string = eval('"chilled"')
 

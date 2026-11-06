@@ -4104,13 +4104,14 @@ rb_str_append_as_bytes(int argc, VALUE *argv, VALUE str)
     for (int index = 0; index < argc; index++) {
         VALUE obj = argv[index];
         enum ruby_value_type type = types[index] = rb_type(obj);
+        rb_len_t len;
         switch (type) {
           case T_FIXNUM:
           case T_BIGNUM:
-            needed_capacity++;
+            len = 1;
             break;
           case T_STRING:
-            needed_capacity += RSTRING_LEN(obj);
+            len = RSTRING_LEN(obj);
             break;
           default:
             rb_raise(
@@ -4120,6 +4121,10 @@ rb_str_append_as_bytes(int argc, VALUE *argv, VALUE str)
             );
             break;
         }
+        if (RB_UNLIKELY(len > RB_LEN_MAX - needed_capacity)) {
+            rb_raise(rb_eArgError, "string sizes too big");
+        }
+        needed_capacity += len;
     }
 
     str_ensure_available_capa(str, needed_capacity);
