@@ -89,4 +89,21 @@ class Test_StrSetLen < Test::Unit::TestCase
     str = Bug::String.new("\0\0\0\0".force_encoding(Encoding::UTF_32BE))
     assert_raise(ArgumentError) {str.resize(max - 3)}
   end
+
+  def test_cat_too_big
+    max = 2 ** (RbConfig::SIZEOF['rb_len_t'] * 8 - 1) - 1
+    str = Bug::String.new("ab")
+    assert_raise(ArgumentError) {str.cat("", max - 2)}
+    str = Bug::String.new("\0\0\0\0".force_encoding(Encoding::UTF_32BE))
+    assert_raise(ArgumentError) {str.cat("", max - 7)}
+  end
+
+  def test_cat_capacity_doubling
+    omit "the capacity can be allocated" if RbConfig::SIZEOF['rb_len_t'] < 8
+    half = 2 ** (RbConfig::SIZEOF['rb_len_t'] * 8 - 2)
+    [half - 3, half - 2].each do |total|
+      str = Bug::String.new("\0\0\0\0".force_encoding(Encoding::UTF_32BE))
+      assert_raise(NoMemoryError) {str.cat("", total - 4)}
+    end
+  end
 end

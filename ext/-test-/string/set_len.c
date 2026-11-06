@@ -23,10 +23,19 @@ bug_str_resize(VALUE str, VALUE len)
     return str;
 }
 
+static VALUE
+bug_str_cat(VALUE str, VALUE addendum, VALUE len)
+{
+    StringValue(addendum);
+    rb_str_cat(str, RSTRING_PTR(addendum), NUM2LEN(len));
+    return str;
+}
+
 void
 Init_string_set_len(VALUE klass)
 {
     rb_define_method(klass, "set_len", bug_str_set_len, 1);
     rb_define_method(klass, "append", bug_str_append, 1);
     rb_define_method(klass, "resize", bug_str_resize, 1);
+    rb_define_method(klass, "cat", bug_str_cat, 2);
 }

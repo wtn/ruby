@@ -3699,7 +3699,7 @@ str_ensure_available_capa(VALUE str, rb_len_t len)
     const int termlen = TERM_LEN(str);
     rb_len_t olen = RSTRING_LEN(str);
 
-    if (RB_UNLIKELY(olen > RB_LEN_MAX - len)) {
+    if (RB_UNLIKELY(olen > RB_LEN_MAX - termlen - len)) {
         rb_raise(rb_eArgError, "string sizes too big");
     }
 
@@ -3707,7 +3707,7 @@ str_ensure_available_capa(VALUE str, rb_len_t len)
     rb_len_t capa = str_capacity(str, termlen);
 
     if (capa < total) {
-        if (total >= RB_LEN_MAX / 2) {
+        if (total >= (RB_LEN_MAX - termlen) / 2) {
             capa = total;
         }
         while (total > capa) {
@@ -3739,12 +3739,12 @@ str_buf_cat4(VALUE str, const char *ptr, rb_len_t len, bool keep_cr)
 
     rb_len_t capa = str_capacity(str, termlen);
 
-    if (olen > RB_LEN_MAX - len) {
+    if (olen > RB_LEN_MAX - termlen - len) {
         rb_raise(rb_eArgError, "string sizes too big");
     }
     total = olen + len;
     if (capa < total) {
-        if (total >= RB_LEN_MAX / 2) {
+        if (total >= (RB_LEN_MAX - termlen) / 2) {
             capa = total;
         }
         while (total > capa) {
