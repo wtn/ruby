@@ -85,6 +85,11 @@ class TestRegexp < Test::Unit::TestCase
     end
   end
 
+  def test_to_s_comment_in_char_class
+    re = EnvUtil.suppress_warning { Regexp.new('(?:[](?#\x{7FFFFFFF})])') }
+    assert_equal('(?-mix:[](?#\x{7FFFFFFF})])', EnvUtil.suppress_warning { re.to_s })
+  end
+
   def test_to_s_extended_subexp
     re = /#\g#{"\n"}/x
     re = /#{re}/
