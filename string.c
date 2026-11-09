@@ -3391,7 +3391,7 @@ rb_str_concat_literals(size_t num, const VALUE *strary)
         rb_str_buf_append(str, v);
         if (encidx != ENCINDEX_US_ASCII) {
             if (ENCODING_GET_INLINED(str) == ENCINDEX_US_ASCII)
-                rb_enc_set_index(str, encidx);
+                rb_enc_associate_index(str, encidx);
         }
     }
     return str;
