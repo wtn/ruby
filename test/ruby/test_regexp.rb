@@ -1087,6 +1087,53 @@ class TestRegexp < Test::Unit::TestCase
     assert_no_match(re, c + "ab")
   end
 
+  def test_comment_group_compiled_again_for_string
+    sjis = Encoding::Windows_31J
+    latin1 = Encoding::ISO_8859_1
+    sjis_str = "\x81\\a".dup.force_encoding(sjis)
+    latin1_str = "\xE9a".dup.force_encoding(latin1)
+    utf8_str = "\xC3\xA9a".dup.force_encoding(Encoding::UTF_8)
+
+    re = Regexp.new("(?#\x81\\\\)(a)".dup.force_encoding(sjis))
+    assert_predicate(re, :fixed_encoding?)
+    assert_equal(sjis, re.encoding)
+    assert_equal(1, re.match("a").size)
+    assert_equal(1, re.match(sjis_str).size)
+    assert_raise(Encoding::CompatibilityError) { re.match(latin1_str) }
+    assert_raise(Encoding::CompatibilityError) { latin1_str.start_with?(re) }
+
+    re = eval("# encoding: windows-31j\n/(?#\x95\\)(a)/".dup.force_encoding(sjis))
+    assert_predicate(re, :fixed_encoding?)
+    assert_equal(2, re.match(sjis_str).size)
+    assert_raise(Encoding::CompatibilityError) { re.match(latin1_str) }
+
+    re = Regexp.new("(?#\\\x81\\)(a)".dup.force_encoding(sjis))
+    assert_predicate(re, :fixed_encoding?)
+    assert_equal(2, re.match(sjis_str).size)
+    assert_raise(Encoding::CompatibilityError) { re.match(latin1_str) }
+
+    re = Regexp.new("(?#\xA4\\)(a)".dup.force_encoding(Encoding::Big5))
+    assert_predicate(re, :fixed_encoding?)
+    assert_equal(2, re.match("a").size)
+    assert_raise(Encoding::CompatibilityError) { re.match(latin1_str) }
+
+    [
+      ["(?#\x81\\\\)(a)", latin1],
+      ["(?#\x81\\\\)(a)", Encoding::BINARY],
+      ["(?x:(?#\x81\\\\)(a))", latin1],
+      ["(?#\x8F\xA1\xA1\\))(a)", Encoding::EUC_JP],
+      ["(?#\xA4\xA2)(a)", Encoding::EUC_JP],
+    ].each do |src, enc|
+      re = Regexp.new(src.dup.force_encoding(enc))
+      assert_not_predicate(re, :fixed_encoding?)
+      assert_equal(2, re.match("a").size)
+      assert_equal(2, re.match(latin1_str).size)
+      assert_equal(2, re.match(sjis_str).size)
+      assert_equal(2, re.match(utf8_str).size)
+      assert_equal("a", sjis_str[re, 1])
+    end
+  end
+
   def test_ignorecase
     v = assert_deprecated_warning(/variable \$= is no longer effective/) { $= }
     assert_equal(false, v)

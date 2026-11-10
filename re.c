@@ -2107,7 +2107,7 @@ rb_reg_fixed_encoding_p(VALUE re)
 
 static VALUE
 rb_reg_preprocess(const char *p, const char *end, rb_encoding *enc,
-        rb_encoding **fixed_enc, onig_errmsg_buffer err, int options);
+        rb_encoding **fixed_enc, onig_errmsg_buffer err, int options, int again);
 
 NORETURN(static void reg_enc_error(VALUE re, VALUE str));
 
@@ -2190,7 +2190,7 @@ reg_prepare_re(VALUE re, VALUE str, bool caller_owned)
     onig_errmsg_buffer err = "";
     unescaped = rb_reg_preprocess(
         pattern, pattern + RSTRING_LEN(src_str), enc,
-        &fixed_enc, err, reg->options);
+        &fixed_enc, err, reg->options, 1);
 
     if (NIL_P(unescaped)) {
         rb_raise(rb_eArgError, "regexp preprocess failed: %s", err);
@@ -3660,10 +3660,25 @@ unescape_unicode_bmp(const char **pp, const char *end,
     return 0;
 }
 
+static const char *
+comment_group_end(const char *p, const char *end)
+{
+    while (p < end) {
+        switch (*p++) {
+          case '\\':
+            if (p < end) p++;
+            break;
+          case ')':
+            return p;
+        }
+    }
+    return NULL;
+}
+
 static int
 unescape_nonascii0(const char **pp, const char *end, rb_encoding *enc,
         VALUE buf, rb_encoding **encp, int *has_property,
-        onig_errmsg_buffer err, int options, int recurse)
+        onig_errmsg_buffer err, int options, int again, int recurse)
 {
     const char *p = *pp;
     unsigned char c;
@@ -3819,8 +3834,13 @@ escape_asis:
                 if (*(p+1) == '#') {
                     /* (?# is comment inside any regexp, and content inside should be ignored */
                     const char *orig_p = p;
+                    const char *bytewise_end = comment_group_end(p, end);
                     int cont = 1;
 
+                    if (again && bytewise_end) {
+                        p = bytewise_end;
+                        cont = 0;
+                    }
                     while (cont && (p < end)) {
                         switch (c = *p++) {
                           default:
@@ -3848,6 +3868,11 @@ escape_asis:
                         p = orig_p;
                         c = '(';
                         rb_str_buf_cat(buf, (char *)&c, 1);
+                    }
+                    else if (!*encp && p != bytewise_end) {
+                        /* the comment ends elsewhere when read byte-wise,
+                           as it is when compiled again for a string */
+                        *encp = enc;
                     }
                     break;
                 }
@@ -3891,7 +3916,7 @@ escape_asis:
                                 rb_str_buf_cat(buf, (char *)&c, 1);
                                 int ret = unescape_nonascii0(&p, end, enc, buf, encp,
                                                              has_property, err,
-                                                             local_options, 1);
+                                                             local_options, again, 1);
                                 if (ret < 0) return ret;
                                 goto begin_scan;
                             }
@@ -3934,15 +3959,15 @@ fallthrough:
 static int
 unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
         VALUE buf, rb_encoding **encp, int *has_property,
-        onig_errmsg_buffer err, int options)
+        onig_errmsg_buffer err, int options, int again)
 {
     return unescape_nonascii0(&p, end, enc, buf, encp, has_property,
-                              err, options, 0);
+                              err, options, again, 0);
 }
 
 static VALUE
 rb_reg_preprocess(const char *p, const char *end, rb_encoding *enc,
-        rb_encoding **fixed_enc, onig_errmsg_buffer err, int options)
+        rb_encoding **fixed_enc, onig_errmsg_buffer err, int options, int again)
 {
     VALUE buf;
     int has_property = 0;
@@ -3956,7 +3981,7 @@ rb_reg_preprocess(const char *p, const char *end, rb_encoding *enc,
         rb_enc_associate(buf, enc);
     }
 
-    if (unescape_nonascii(p, end, enc, buf, fixed_enc, &has_property, err, options) != 0)
+    if (unescape_nonascii(p, end, enc, buf, fixed_enc, &has_property, err, options, again) != 0)
         return Qnil;
 
     if (has_property && !*fixed_enc) {
@@ -3984,7 +4009,7 @@ rb_reg_check_preprocess(VALUE str)
     end = p + RSTRING_LEN(str);
     enc = rb_enc_get(str);
 
-    buf = rb_reg_preprocess(p, end, enc, &fixed_enc, err, 0);
+    buf = rb_reg_preprocess(p, end, enc, &fixed_enc, err, 0, 0);
     RB_GC_GUARD(str);
 
     if (NIL_P(buf)) {
@@ -4026,7 +4051,7 @@ rb_reg_preprocess_dregexp(VALUE ary, int options)
         p = RSTRING_PTR(str);
         end = p + RSTRING_LEN(str);
 
-        buf = rb_reg_preprocess(p, end, src_enc, &fixed_enc, err, options);
+        buf = rb_reg_preprocess(p, end, src_enc, &fixed_enc, err, options, 0);
 
         if (NIL_P(buf))
             rb_raise(rb_eArgError, "%s", err);
@@ -4077,7 +4102,7 @@ rb_reg_initialize(VALUE obj, const char *s, rb_len_t len, rb_encoding *enc,
         return -1;
     }
 
-    unescaped = rb_reg_preprocess(s, s+len, enc, &fixed_enc, err, options);
+    unescaped = rb_reg_preprocess(s, s+len, enc, &fixed_enc, err, options, 0);
     if (NIL_P(unescaped))
         return -1;
 
