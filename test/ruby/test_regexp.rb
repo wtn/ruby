@@ -1134,6 +1134,25 @@ class TestRegexp < Test::Unit::TestCase
     end
   end
 
+  def test_escaped_non_ascii_compiled_again_for_string
+    latin1 = Encoding::ISO_8859_1
+    latin1_str = "\xE9".dup.force_encoding(latin1)
+    big5_str = "\xA4\x40a]".dup.force_encoding(Encoding::Big5)
+
+    re = Regexp.new("[\\\xE9\\](a)]".dup.force_encoding(latin1))
+    assert_equal(latin1, re.encoding)
+    assert_predicate(re, :fixed_encoding?)
+    assert_equal(1, re.match("a").size)
+    assert_equal(1, re.match(latin1_str).size)
+    assert_raise(Encoding::CompatibilityError) { re.match(big5_str) }
+
+    re = Regexp.new("\\\xE9".b)
+    assert_equal(Encoding::BINARY, re.encoding)
+    assert_predicate(re, :fixed_encoding?)
+    assert_match(re, "\xE9".b)
+    assert_raise(Encoding::CompatibilityError) { re.match(latin1_str) }
+  end
+
   def test_ignorecase
     v = assert_deprecated_warning(/variable \$= is no longer effective/) { $= }
     assert_equal(false, v)

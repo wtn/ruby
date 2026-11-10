@@ -3719,7 +3719,7 @@ begin_scan:
             if (!MBCLEN_CHARFOUND_P(chlen)) {
                 goto invalid_multibyte;
             }
-            if ((chlen = MBCLEN_CHARFOUND_LEN(chlen)) > 1) {
+            if ((chlen = MBCLEN_CHARFOUND_LEN(chlen)) > 1 || (*p & 0x80)) {
                 /* include the previous backslash */
                 --p;
                 ++chlen;
