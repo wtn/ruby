@@ -885,6 +885,10 @@ class TestClass < Test::Unit::TestCase
     end
   end
 
+  def test_subclasses_excludes_frozen_core
+    assert_empty(BasicObject.subclasses - ObjectSpace.each_object(Class).to_a)
+  end
+
   def test_attached_object
     c = Class.new
     sc = c.singleton_class

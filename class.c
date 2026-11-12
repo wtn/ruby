@@ -2181,6 +2181,7 @@ class_descendants_recursive(VALUE klass, VALUE v)
     struct subclass_traverse_data *data = (struct subclass_traverse_data *) v;
 
     if (RB_TYPE_P(klass, T_ICLASS)) return; // skip refinement ICLASSes
+    if (klass == rb_mRubyVMFrozenCore) return; // skip the internal FrozenCore
 
     if (!RCLASS_SINGLETON_P(klass)) {
         if (data->buffer && data->count < data->maxcount && !rb_objspace_garbage_object_p(klass)) {
@@ -2279,6 +2280,7 @@ module_descendants_add(VALUE klass, struct descendants_traverse_data *data)
     // skip entries beyond the estimation to keep the enumeration pass allocation-free
     if (data->buffer && data->count >= data->maxcount) return;
 
+    if (klass == rb_mRubyVMFrozenCore) return; // skip the internal FrozenCore
     if (st_insert(data->visited, (st_data_t)klass, 1)) return; // already visited
 
     if (data->buffer) {

@@ -298,6 +298,10 @@ class TestModule < Test::Unit::TestCase
     end;
   end
 
+  def test_descendants_excludes_frozen_core
+    assert_empty(BasicObject.descendants - ObjectSpace.each_object(Module).to_a)
+  end
+
   CLASS_EVAL = 2
   @@class_eval = 'b'
 
