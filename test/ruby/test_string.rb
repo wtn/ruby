@@ -1525,6 +1525,29 @@ class TestString < Test::Unit::TestCase
     assert_raise(FrozenError) { S("\x00").freeze.bitwise_xor!(S("\x00")) }
   end
 
+  def test_bitwise_bang_chilled_string_warning
+    return unless @cls == String
+    assert_separately([], "#{<<-"{#"}\n#{<<-'};'}")
+    END {
+      %i[bitwise_and! bitwise_or! bitwise_xor!].each do |op|
+        $target = "abcdefghijklmnop" # chilled string
+        assert_raise(ArgumentError) { $target.__send__(op, "Q" * 16) }
+      end
+    }
+    {#
+      module GrowReceiverWarning
+        def warn(message, category: nil, **kwargs)
+          if category == :deprecated
+            $target.replace("\0" * 100_000)
+            return nil
+          end
+          super
+        end
+      end
+      Warning.extend(GrowReceiverWarning)
+    };
+  end
+
   def test_each_codepoint
     # Single byte optimization
     assert_equal 65, S("ABC").each_codepoint.next

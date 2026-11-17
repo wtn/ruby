@@ -8480,8 +8480,8 @@ rb_str_bitwise_not_bang(VALUE str)
         rb_len_t len;                                                       \
         unsigned char *ptr;                                                 \
         StringValue(other);                                                 \
-        str_check_bitwise_length(str, other);                               \
         rb_str_modify(str);                                                 \
+        str_check_bitwise_length(str, other);                               \
         len = RSTRING_LEN(str);                                             \
         ptr = (unsigned char *)RSTRING_PTR(str);                            \
         str_bitwise_##name(ptr, ptr,                                        \
