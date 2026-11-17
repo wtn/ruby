@@ -6302,13 +6302,14 @@ rb_str_update(VALUE str, rb_len_t beg, rb_len_t len, VALUE val)
     rb_len_t slen;
     char *p, *e;
     rb_encoding *enc;
-    int singlebyte = single_byte_optimizable(str);
+    int singlebyte;
     int cr;
 
     if (len < 0) rb_raise(rb_eIndexError, "negative length %"PRIdLEN, len);
 
     StringValue(val);
     enc = rb_enc_check(str, val);
+    singlebyte = single_byte_optimizable(str);
     slen = str_strlen(str, enc); /* rb_enc_check */
 
     if ((slen < beg) || ((beg < 0) && (beg + slen < 0))) {

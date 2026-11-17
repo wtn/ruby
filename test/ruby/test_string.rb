@@ -272,6 +272,17 @@ class TestString < Test::Unit::TestCase
     assert_raise(RuntimeError) { str[/h.l/] = obj }
   end
 
+  def test_ASET_string_made_multibyte_during_conversion
+    str = S("cafe")
+    obj = Object.new
+    obj.define_singleton_method(:to_str) do
+      str.replace("café")
+      "x"
+    end
+    str[3] = obj
+    assert_equal("cafx", str)
+  end
+
   def test_CMP # '<=>'
     assert_equal(1, S("abcdef") <=> S("abcde"))
     assert_equal(0, S("abcdef") <=> S("abcdef"))
@@ -2003,6 +2014,17 @@ class TestString < Test::Unit::TestCase
     assert_raise(IndexError) { S("abcd").insert(-6, 'X') }
     assert_raise(TypeError) { S("abcd").insert(2, 42) }
     assert_raise(FrozenError) { S("abcd").freeze.insert(2, 'X') }
+  end
+
+  def test_insert_string_made_multibyte_during_conversion
+    str = S("cafe")
+    obj = Object.new
+    obj.define_singleton_method(:to_str) do
+      str.replace("café")
+      "!"
+    end
+    str.insert(4, obj)
+    assert_equal("café!", str)
   end
 
   def test_intern
