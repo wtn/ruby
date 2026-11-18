@@ -1247,6 +1247,7 @@ rb_marshal_dump_limited(VALUE obj, VALUE port, int limit)
 struct load_arg {
     VALUE src;
     char *buf;
+    long bufsize;
     long buflen;
     long readable;
     long offset;
@@ -1327,15 +1328,23 @@ static unsigned char
 r_byte1_buffered(struct load_arg *arg)
 {
     if (arg->buflen == 0) {
-        long readable = arg->readable < BUFSIZ ? arg->readable : BUFSIZ;
+        long readable = arg->readable < arg->bufsize ? arg->readable : arg->bufsize;
+        long read_len;
         VALUE str, n = LONG2NUM(readable);
 
         str = load_funcall(arg, arg->src, s_read, 1, &n);
         if (NIL_P(str)) too_short();
         StringValue(str);
-        memcpy(arg->buf, RSTRING_PTR(str), RSTRING_LEN(str));
+        read_len = RSTRING_LEN(str);
+        if (UNLIKELY(read_len < readable)) too_short();
+        if (UNLIKELY(read_len > arg->bufsize)) {
+            arg->buf = ruby_xrealloc2(arg->buf, read_len, 1);
+            arg->bufsize = read_len;
+        }
+        memcpy(arg->buf, RSTRING_PTR(str), read_len);
         arg->offset = 0;
-        arg->buflen = RSTRING_LEN(str);
+        arg->buflen = read_len;
+        RB_GC_GUARD(str);
     }
     arg->buflen--;
     return arg->buf[arg->offset++];
@@ -1451,7 +1460,7 @@ r_bytes1_buffered(long len, struct load_arg *arg)
         long tmp_len, read_len, need_len = len - buflen;
         VALUE tmp, n;
 
-        readable = readable < BUFSIZ ? readable : BUFSIZ;
+        readable = readable < arg->bufsize ? readable : arg->bufsize;
         read_len = need_len > readable ? need_len : readable;
         n = LONG2NUM(read_len);
         tmp = load_funcall(arg, arg->src, s_read, 1, &n);
@@ -2318,6 +2327,7 @@ clear_load_arg(struct load_arg *arg)
         xfree(arg->buf);
         arg->buf = 0;
     }
+    arg->bufsize = 0;
     arg->buflen = 0;
     arg->offset = 0;
     arg->readable = 0;
@@ -2363,10 +2373,14 @@ rb_marshal_load_with_proc(VALUE port, VALUE proc, bool freeze)
     arg->readable = 0;
     arg->freeze = freeze;
 
-    if (NIL_P(v))
+    if (NIL_P(v)) {
+        arg->bufsize = BUFSIZ;
         arg->buf = xmalloc(BUFSIZ);
-    else
+    }
+    else {
+        arg->bufsize = 0;
         arg->buf = 0;
+    }
 
     major = r_byte(arg);
     minor = r_byte(arg);
