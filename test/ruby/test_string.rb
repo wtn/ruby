@@ -1640,6 +1640,8 @@ CODE
     assert_nil(S("こんにち").rindex(S("こんにちは")))
     assert_nil(S("こ").rindex(S("こんにちは")))
     assert_nil(S("").rindex(S("こんにちは")))
+
+    assert_nil(S("A" * 1024).rindex(S("\u{3042}")))
   end
 
   def test_rjust
