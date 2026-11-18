@@ -1488,6 +1488,10 @@ r_bytes1_buffered(long len, struct load_arg *arg)
 
         if (tmp_len > need_len) {
             buflen = tmp_len - need_len;
+            if (UNLIKELY(buflen > arg->bufsize)) {
+                arg->buf = ruby_xrealloc2(arg->buf, buflen, 1);
+                arg->bufsize = buflen;
+            }
             memcpy(arg->buf, RSTRING_PTR(tmp)+need_len, buflen);
             arg->buflen = buflen;
         }
