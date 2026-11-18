@@ -7339,13 +7339,17 @@ rb_w32_read(int fd, void *buf, size_t size)
                 errno = EINTR;
             else
                 errno = map_errno(GetLastError());
-            CloseHandle(ol.hEvent);
             CancelIo((HANDLE)_osfhnd(fd));
-            rb_acrt_lowio_unlock_fh(fd);
-            return -1;
+            /* the read may have completed before the cancel, and the kernel
+             * writes ol and buf until it ends either way */
+            GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &read, TRUE);
+            if (!read) {
+                CloseHandle(ol.hEvent);
+                rb_acrt_lowio_unlock_fh(fd);
+                return -1;
+            }
         }
-
-        if (!GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &read, TRUE) &&
+        else if (!GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &read, TRUE) &&
             (err = GetLastError()) != ERROR_HANDLE_EOF) {
             int ret = 0;
             if (err != ERROR_BROKEN_PIPE) {
@@ -7448,13 +7452,15 @@ rb_w32_write(int fd, const void *buf, size_t size)
                 errno = EINTR;
             else
                 errno = map_errno(GetLastError());
-            CloseHandle(ol.hEvent);
             CancelIo((HANDLE)_osfhnd(fd));
-            rb_acrt_lowio_unlock_fh(fd);
-            return -1;
+            GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &written, TRUE);
+            if (!written) {
+                CloseHandle(ol.hEvent);
+                rb_acrt_lowio_unlock_fh(fd);
+                return -1;
+            }
         }
-
-        if (!GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &written, TRUE)) {
+        else if (!GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &written, TRUE)) {
             errno = map_errno(GetLastError());
             CloseHandle(ol.hEvent);
             CancelIo((HANDLE)_osfhnd(fd));
