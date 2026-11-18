@@ -1642,6 +1642,17 @@ CODE
     assert_nil(S("").rindex(S("こんにちは")))
 
     assert_nil(S("A" * 1024).rindex(S("\u{3042}")))
+
+    # exact-size allocations, so a comparison past the last byte leaves them
+    assert_nil(S("A" * 1020 + "\u{3042}A").rindex(S("\u{3042}\u{3044}")))
+    assert_nil(S("\u{3042}" + "A" * 1021).rindex(S("\u{3042}" * 1022)))
+
+    WIDE_ENCODINGS.each do |enc|
+      pattern = "A".encode(enc)
+      stray = pattern.b[0]
+      assert_nil(S(stray).force_encoding(enc).rindex(pattern), enc.name)
+      assert_nil(S("B".encode(enc).b * 2 + stray).force_encoding(enc).rindex(pattern), enc.name)
+    end
   end
 
   def test_rjust
